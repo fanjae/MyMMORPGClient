@@ -1,0 +1,158 @@
+public enum EnterGameResult : byte
+{
+    Success = 0,
+    InvalidAuthKey = 1,
+    AlreadyAuthenticated = 2,
+    CharacterLoadFailed = 3,
+    AlreadyInGame = 4,
+    MapEnterFailed = 5
+}
+
+public enum ChangeMapResult : byte
+{
+    Success = 0,
+    MapNotFound = 1,
+    AlreadyInMap = 2,
+    MapEnterFailed = 3
+}
+
+public sealed class EnterGameData
+{
+    public EnterGameResult Result;
+    public uint CharacterId;
+    public string Name;
+    public ushort Level;
+    public int X;
+    public int Y;
+}
+
+public sealed class PlayerEnterData
+{
+    public uint CharacterId;
+    public string Name;
+    public ushort Level;
+    public int X;
+    public int Y;
+}
+
+public struct PlayerMoveData
+{
+    public uint CharacterId;
+    public int X;
+    public int Y;
+}
+
+public struct MonsterEnterData
+{
+    public uint MonsterId;
+    public int X;
+    public int Y;
+}
+
+public struct ChangeMapData
+{
+    public ChangeMapResult Result;
+    public uint MapId;
+    public int X;
+    public int Y;
+}
+
+public static class GameProtocol
+{
+    public const int MaxPlayerNameLength = 16;
+    public const int MaxChatMessageLength = 128;
+
+    public static byte[] CreateEnterGameRequest(ulong authKey)
+    {
+        using PacketWriter writer = new();
+        writer.Write(authKey);
+        return writer.ToArray();
+    }
+
+    public static EnterGameData ReadEnterGameResponse(byte[] payload)
+    {
+        PacketReader reader = new(payload);
+
+        return new EnterGameData
+        {
+            Result = (EnterGameResult)reader.ReadByte(),
+            CharacterId = reader.ReadUInt32(),
+            Name = reader.ReadFixedString(MaxPlayerNameLength),
+            Level = reader.ReadUInt16(),
+            X = reader.ReadInt32(),
+            Y = reader.ReadInt32()
+        };
+    }
+
+    public static PlayerEnterData ReadPlayerEnterMap(byte[] payload)
+    {
+        PacketReader reader = new(payload);
+
+        return new PlayerEnterData
+        {
+            CharacterId = reader.ReadUInt32(),
+            Name = reader.ReadFixedString(MaxPlayerNameLength),
+            Level = reader.ReadUInt16(),
+            X = reader.ReadInt32(),
+            Y = reader.ReadInt32()
+        };
+    }
+
+    public static uint ReadPlayerLeaveMap(byte[] payload)
+    {
+        PacketReader reader = new(payload);
+        return reader.ReadUInt32();
+    }
+
+    public static PlayerMoveData ReadPlayerMove(byte[] payload)
+    {
+        PacketReader reader = new(payload);
+
+        return new PlayerMoveData
+        {
+            CharacterId = reader.ReadUInt32(),
+            X = reader.ReadInt32(),
+            Y = reader.ReadInt32()
+        };
+    }
+
+    public static MonsterEnterData ReadMonsterEnterMap(byte[] payload)
+    {
+        PacketReader reader = new(payload);
+
+        return new MonsterEnterData
+        {
+            MonsterId = reader.ReadUInt32(),
+            X = reader.ReadInt32(),
+            Y = reader.ReadInt32()
+        };
+    }
+
+    public static byte[] CreateMoveRequest(int x, int y)
+    {
+        using PacketWriter writer = new();
+        writer.Write(x);
+        writer.Write(y);
+        return writer.ToArray();
+    }
+
+    public static byte[] CreateChangeMapRequest(uint mapId)
+    {
+        using PacketWriter writer = new();
+        writer.Write(mapId);
+        return writer.ToArray();
+    }
+
+    public static ChangeMapData ReadChangeMapResponse(byte[] payload)
+    {
+        PacketReader reader = new(payload);
+
+        return new ChangeMapData
+        {
+            Result = (ChangeMapResult)reader.ReadByte(),
+            MapId = reader.ReadUInt32(),
+            X = reader.ReadInt32(),
+            Y = reader.ReadInt32()
+        };
+    }
+}
