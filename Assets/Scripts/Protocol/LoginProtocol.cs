@@ -1,3 +1,5 @@
+using System.IO;
+
 public enum LoginResult : byte
 {
     Success = 0,
@@ -55,16 +57,19 @@ public static class LoginProtocol
 
     public static LoginResult ReadLoginResponse(byte[] payload)
     {
-        PacketReader reader = new(payload);
+        PacketReader reader = new(payload, 1);
         return (LoginResult)reader.ReadByte();
     }
 
     public static CharacterListData ReadCharacterListResponse(byte[] payload)
     {
-        PacketReader reader = new(payload);
+        PacketReader reader = new(payload, 2 + MaxCharacterCount * (4 + MaxCharacterNameLength + 2));
 
         CharacterListResult result = (CharacterListResult)reader.ReadByte();
         byte count = reader.ReadByte();
+
+        if (count > MaxCharacterCount)
+            throw new InvalidDataException($"Invalid character count: {count}");
 
         CharacterInfo[] characters = new CharacterInfo[count];
 
@@ -102,7 +107,7 @@ public static class LoginProtocol
 
     public static CharacterSelectData ReadCharacterSelectResponse(byte[] payload)
     {
-        PacketReader reader = new(payload);
+        PacketReader reader = new(payload, 1 + 8 + 2);
 
         return new CharacterSelectData
         {

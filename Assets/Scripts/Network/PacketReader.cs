@@ -6,8 +6,11 @@ public sealed class PacketReader
 {
     private readonly BinaryReader _reader;
 
-    public PacketReader(byte[] data)
+    public PacketReader(byte[] data, int expectedLength)
     {
+        if (data == null || data.Length != expectedLength)
+            throw new InvalidDataException($"Invalid payload size: {data?.Length ?? 0}, expected {expectedLength}");
+
         _reader = new BinaryReader(new MemoryStream(data), Encoding.UTF8);
     }
 

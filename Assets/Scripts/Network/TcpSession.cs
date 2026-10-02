@@ -12,6 +12,7 @@ public sealed class TcpSession : IDisposable
     private TcpClient _client;
     private NetworkStream _stream;
     private CancellationTokenSource _cancellation;
+    private readonly SemaphoreSlim _sendLock = new(1, 1);
 
     public event Action<ushort, byte[]> PacketReceived;
     public event Action Disconnected;
@@ -26,12 +27,21 @@ public sealed class TcpSession : IDisposable
         _client = new TcpClient();
         _cancellation = new CancellationTokenSource();
 
-        await _client.ConnectAsync(host, port);
+        try
+        {
+            await _client.ConnectAsync(host, port);
+            _stream = _client.GetStream();
 
-        _stream = _client.GetStream();
-
-        // 연결 이후 별도 비동기 루프로 패킷 수신 시작
-        _ = ReceiveLoopAsync(_cancellation.Token);
+            // 수신 루프는 Unity 메인 스레드 밖에서 실행하고 패킷 이벤트만 상위 계층에 전달한다.
+            NetworkStream stream = _stream;
+            CancellationToken cancellationToken = _cancellation.Token;
+            _ = Task.Run(() => ReceiveLoopAsync(stream, cancellationToken));
+        }
+        catch
+        {
+            Dispose();
+            throw;
+        }
     }
 
     public async Task SendAsync(ushort opcode, byte[] payload)
@@ -56,10 +66,23 @@ public sealed class TcpSession : IDisposable
 
         Buffer.BlockCopy(payload, 0, packet, HeaderSize, payload.Length);
 
-        await _stream.WriteAsync(packet, 0, packet.Length);
+        // 여러 송신 요청이 겹쳐도 TCP 패킷 바이트가 서로 섞이지 않도록 직렬화한다.
+        await _sendLock.WaitAsync();
+
+        try
+        {
+            if (_stream == null)
+                throw new InvalidOperationException("Session is not connected.");
+
+            await _stream.WriteAsync(packet, 0, packet.Length);
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
     }
 
-    private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
+    private async Task ReceiveLoopAsync(NetworkStream stream, CancellationToken cancellationToken)
     {
         try
         {
@@ -68,7 +91,7 @@ public sealed class TcpSession : IDisposable
             while (!cancellationToken.IsCancellationRequested)
             {
                 // TCP는 패킷 경계를 보장하지 않으므로 헤더 길이만큼 정확히 수신
-                await ReadExactAsync(header, HeaderSize, cancellationToken);
+                await ReadExactAsync(stream, header, HeaderSize, cancellationToken);
 
                 ushort size = (ushort)(header[0] | (header[1] << 8));
                 ushort opcode = (ushort)(header[2] | (header[3] << 8));
@@ -81,7 +104,7 @@ public sealed class TcpSession : IDisposable
 
                 // 헤더에 기록된 크기만큼 Payload를 모두 수신한 뒤 상위 계층에 전달
                 if (payloadSize > 0)
-                    await ReadExactAsync(payload, payloadSize, cancellationToken);
+                    await ReadExactAsync(stream, payload, payloadSize, cancellationToken);
 
                 PacketReceived?.Invoke(opcode, payload);
             }
@@ -91,18 +114,22 @@ public sealed class TcpSession : IDisposable
         }
         catch (Exception)
         {
-            Disconnected?.Invoke();
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                Dispose();
+                Disconnected?.Invoke();
+            }
         }
     }
 
-    private async Task ReadExactAsync(byte[] buffer, int length, CancellationToken cancellationToken)
+    private static async Task ReadExactAsync(NetworkStream stream, byte[] buffer, int length, CancellationToken cancellationToken)
     {
         int offset = 0;
 
         // 한 번의 ReadAsync로 요청한 크기가 모두 들어온다는 보장이 없으므로 누적 수신
         while (offset < length)
         {
-            int received = await _stream.ReadAsync(buffer, offset, length - offset, cancellationToken);
+            int received = await stream.ReadAsync(buffer, offset, length - offset, cancellationToken).ConfigureAwait(false);
 
             if (received == 0)
                 throw new IOException("Remote endpoint closed the connection.");

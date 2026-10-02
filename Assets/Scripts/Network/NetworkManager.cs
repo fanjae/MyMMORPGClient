@@ -20,21 +20,39 @@ public sealed class NetworkManager : MonoBehaviour
     public event Action<PlayerMoveData> PlayerMoved;
     public event Action<MonsterEnterData> MonsterEntered;
     public event Action<ChangeMapData> MapChanged;
+    public event Action LoginDisconnected;
+    public event Action GameDisconnected;
 
     private void Update()
     {
         // 네트워크 수신 스레드에서 등록한 작업을 Unity 메인 스레드에서 처리
         while (_mainThreadQueue.TryDequeue(out Action action))
-            action();
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception);
+            }
+        }
     }
 
     public async Task ConnectLoginServerAsync(string host, int port)
     {
         // 로그인 서버 전용 세션 생성 및 패킷 수신 콜백 등록
-        _loginSession = new TcpSession();
-        _loginSession.PacketReceived += OnLoginPacketReceived;
+        _loginSession?.Dispose();
+        TcpSession session = new();
+        _loginSession = session;
+        session.PacketReceived += (opcode, payload) => OnLoginPacketReceived(session, opcode, payload);
+        session.Disconnected += () => _mainThreadQueue.Enqueue(() =>
+        {
+            if (ReferenceEquals(_loginSession, session))
+                LoginDisconnected?.Invoke();
+        });
 
-        await _loginSession.ConnectAsync(host, port);
+        await session.ConnectAsync(host, port);
     }
 
     public Task SendLoginAsync(string loginId, string password)
@@ -57,14 +75,21 @@ public sealed class NetworkManager : MonoBehaviour
     public async Task ConnectGameServerAsync(string host, ushort port, ulong authKey)
     {
         // 게임 서버 전용 세션 생성 및 연결
-        _gameSession = new TcpSession();
-        _gameSession.PacketReceived += OnGamePacketReceived;
+        _gameSession?.Dispose();
+        TcpSession session = new();
+        _gameSession = session;
+        session.PacketReceived += (opcode, payload) => OnGamePacketReceived(session, opcode, payload);
+        session.Disconnected += () => _mainThreadQueue.Enqueue(() =>
+        {
+            if (ReferenceEquals(_gameSession, session))
+                GameDisconnected?.Invoke();
+        });
 
-        await _gameSession.ConnectAsync(host, port);
+        await session.ConnectAsync(host, port);
 
         // 로그인 서버에서 발급받은 인증 키로 게임 서버 입장 요청
         byte[] payload = GameProtocol.CreateEnterGameRequest(authKey);
-        await _gameSession.SendAsync((ushort)GamePacketOpcode.EnterGameRequest, payload);
+        await session.SendAsync((ushort)GamePacketOpcode.EnterGameRequest, payload);
     }
 
     public Task SendMoveAsync(int x, int y)
@@ -79,11 +104,14 @@ public sealed class NetworkManager : MonoBehaviour
         return _gameSession.SendAsync((ushort)GamePacketOpcode.ChangeMapRequest, payload);
     }
 
-    private void OnLoginPacketReceived(ushort opcode, byte[] payload)
+    private void OnLoginPacketReceived(TcpSession session, ushort opcode, byte[] payload)
     {
         // Unity API와 이벤트 구독자가 메인 스레드에서 실행되도록 큐에 등록
         _mainThreadQueue.Enqueue(() =>
         {
+            if (!ReferenceEquals(_loginSession, session))
+                return;
+
             switch ((LoginPacketOpcode)opcode)
             {
                 case LoginPacketOpcode.LoginResponse:
@@ -101,11 +129,14 @@ public sealed class NetworkManager : MonoBehaviour
         });
     }
 
-    private void OnGamePacketReceived(ushort opcode, byte[] payload)
+    private void OnGamePacketReceived(TcpSession session, ushort opcode, byte[] payload)
     {
         // 게임 서버 패킷도 메인 스레드에서 역직렬화 후 이벤트로 전달
         _mainThreadQueue.Enqueue(() =>
         {
+            if (!ReferenceEquals(_gameSession, session))
+                return;
+
             switch ((GamePacketOpcode)opcode)
             {
                 case GamePacketOpcode.EnterGameResponse:

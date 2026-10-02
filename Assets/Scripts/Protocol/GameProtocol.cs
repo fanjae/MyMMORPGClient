@@ -61,6 +61,7 @@ public static class GameProtocol
 {
     public const int MaxPlayerNameLength = 16;
     public const int MaxChatMessageLength = 128;
+    private const int PlayerDataSize = 4 + MaxPlayerNameLength + 2 + 4 + 4;
 
     public static byte[] CreateEnterGameRequest(ulong authKey)
     {
@@ -71,7 +72,7 @@ public static class GameProtocol
 
     public static EnterGameData ReadEnterGameResponse(byte[] payload)
     {
-        PacketReader reader = new(payload);
+        PacketReader reader = new(payload, 1 + PlayerDataSize);
 
         return new EnterGameData
         {
@@ -86,7 +87,7 @@ public static class GameProtocol
 
     public static PlayerEnterData ReadPlayerEnterMap(byte[] payload)
     {
-        PacketReader reader = new(payload);
+        PacketReader reader = new(payload, PlayerDataSize);
 
         return new PlayerEnterData
         {
@@ -100,13 +101,13 @@ public static class GameProtocol
 
     public static uint ReadPlayerLeaveMap(byte[] payload)
     {
-        PacketReader reader = new(payload);
+        PacketReader reader = new(payload, 4);
         return reader.ReadUInt32();
     }
 
     public static PlayerMoveData ReadPlayerMove(byte[] payload)
     {
-        PacketReader reader = new(payload);
+        PacketReader reader = new(payload, 4 + 4 + 4);
 
         return new PlayerMoveData
         {
@@ -118,7 +119,7 @@ public static class GameProtocol
 
     public static MonsterEnterData ReadMonsterEnterMap(byte[] payload)
     {
-        PacketReader reader = new(payload);
+        PacketReader reader = new(payload, 4 + 4 + 4);
 
         return new MonsterEnterData
         {
@@ -145,7 +146,7 @@ public static class GameProtocol
 
     public static ChangeMapData ReadChangeMapResponse(byte[] payload)
     {
-        PacketReader reader = new(payload);
+        PacketReader reader = new(payload, 1 + 4 + 4 + 4);
 
         return new ChangeMapData
         {
