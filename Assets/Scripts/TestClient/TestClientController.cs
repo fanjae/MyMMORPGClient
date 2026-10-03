@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -7,25 +9,25 @@ public sealed class TestClientController : MonoBehaviour
     private NetworkManager _networkManager;
     private WorldManager _worldManager;
 
-    private string _host = "127.0.0.1";
-    private string _loginPort = "7776";
-    private string _loginId = "test";
-    private string _password = "test1234";
     private string _moveX = "120";
     private string _moveY = "45";
     private string _mapId = "100000001";
-    private string _status = "Connect to LoginServer.";
+    private string _status = "";
     private string _lastPlayerMove = "Last PlayerMove: none";
+    private string _chatInput = "";
     private GUIStyle _playerLabelStyle;
+    private GUIStyle _chatMessageStyle;
+    private readonly List<string> _chatMessages = new();
+    private readonly Dictionary<uint, string> _playerNames = new();
+    private Vector2 _chatScroll;
 
     private const float ArrowMoveSpeed = 80f;
     private const float MoveSendInterval = 0.05f;
 
-    private CharacterInfo[] _characters = Array.Empty<CharacterInfo>();
     private uint _currentMapId;
-    private bool _connecting;
     private bool _inGame;
     private bool _sendingMove;
+    private bool _sendingChat;
     private bool _changingMap;
     private int _moveVersion;
     private float _nextMoveSendTime;
@@ -41,6 +43,7 @@ public sealed class TestClientController : MonoBehaviour
         GameObject gameObject = new("Test Client");
         gameObject.AddComponent<NetworkManager>();
         gameObject.AddComponent<WorldManager>();
+        gameObject.AddComponent<LoginScreenController>();
         gameObject.AddComponent<TestClientController>();
     }
 
@@ -59,31 +62,29 @@ public sealed class TestClientController : MonoBehaviour
 
     private void OnEnable()
     {
-        _networkManager.LoginCompleted += OnLoginCompleted;
-        _networkManager.CharacterListReceived += OnCharacterListReceived;
-        _networkManager.CharacterSelected += OnCharacterSelected;
         _networkManager.EnterGameReceived += OnEnterGameReceived;
+        _networkManager.PlayerEntered += OnPlayerEntered;
+        _networkManager.PlayerLeft += OnPlayerLeft;
         _networkManager.PlayerMoved += OnPlayerMoved;
+        _networkManager.PlayerChatReceived += OnPlayerChatReceived;
         _networkManager.MapChanged += OnMapChanged;
-        _networkManager.LoginDisconnected += OnLoginDisconnected;
         _networkManager.GameDisconnected += OnGameDisconnected;
     }
 
     private void OnDisable()
     {
-        _networkManager.LoginCompleted -= OnLoginCompleted;
-        _networkManager.CharacterListReceived -= OnCharacterListReceived;
-        _networkManager.CharacterSelected -= OnCharacterSelected;
         _networkManager.EnterGameReceived -= OnEnterGameReceived;
+        _networkManager.PlayerEntered -= OnPlayerEntered;
+        _networkManager.PlayerLeft -= OnPlayerLeft;
         _networkManager.PlayerMoved -= OnPlayerMoved;
+        _networkManager.PlayerChatReceived -= OnPlayerChatReceived;
         _networkManager.MapChanged -= OnMapChanged;
-        _networkManager.LoginDisconnected -= OnLoginDisconnected;
         _networkManager.GameDisconnected -= OnGameDisconnected;
     }
 
     private void Update()
     {
-        if (!_inGame || _connecting || _changingMap || _worldManager.LocalPlayer == null || !Application.isFocused || GUIUtility.keyboardControl != 0)
+        if (!_inGame || _changingMap || _worldManager.LocalPlayer == null || !Application.isFocused || GUIUtility.keyboardControl != 0)
             return;
 
         Keyboard keyboard = Keyboard.current;
@@ -124,50 +125,24 @@ public sealed class TestClientController : MonoBehaviour
 
     private void OnGUI()
     {
-        DrawPlayerLabels();
-        Rect panel = new(10, 10, 370, Screen.height - 20);
+        if (!_inGame)
+            return;
 
-        if (Event.current.type == EventType.MouseDown && !panel.Contains(Event.current.mousePosition))
+        if (Event.current.type == EventType.KeyDown && (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter) && GUI.GetNameOfFocusedControl() == "MapChatInput")
+        {
+            SendChat();
+            Event.current.Use();
+        }
+
+        DrawPlayerLabels();
+        Rect panel = new(10, 10, 370, Screen.height - 205);
+        Rect chatPanel = new(10, Screen.height - 185, 430, 175);
+
+        if (Event.current.type == EventType.MouseDown && !panel.Contains(Event.current.mousePosition) && !chatPanel.Contains(Event.current.mousePosition))
             GUI.FocusControl(null);
 
         GUILayout.BeginArea(panel, GUI.skin.box);
         GUILayout.Label("MyMMORPG Test Client");
-
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("Host", GUILayout.Width(70));
-        _host = GUILayout.TextField(_host);
-        GUILayout.Label("Port", GUILayout.Width(35));
-        _loginPort = GUILayout.TextField(_loginPort, GUILayout.Width(55));
-        GUILayout.EndHorizontal();
-
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("Login ID", GUILayout.Width(70));
-        _loginId = GUILayout.TextField(_loginId);
-        GUILayout.EndHorizontal();
-
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("Password", GUILayout.Width(70));
-        _password = GUILayout.PasswordField(_password, '*');
-        GUILayout.EndHorizontal();
-
-        GUI.enabled = !_connecting && !_inGame;
-        if (GUILayout.Button("Connect and Login"))
-        {
-            GUI.FocusControl(null);
-            ConnectAndLogin();
-        }
-
-        GUI.enabled = !_connecting && !_inGame;
-        foreach (CharacterInfo character in _characters)
-        {
-            if (GUILayout.Button($"Enter: {character.Name} (ID {character.CharacterId}, Lv {character.Level})"))
-            {
-                GUI.FocusControl(null);
-                SelectCharacter(character.CharacterId);
-            }
-        }
-
-        GUI.enabled = true;
         GUILayout.Label(_status);
         GUILayout.Label($"Map: {_currentMapId}  Local: {_worldManager.LocalCharacterId}");
         GUILayout.Label($"Remote players: {_worldManager.RemotePlayerCount}  Monsters: {_worldManager.MonsterCount}");
@@ -181,7 +156,7 @@ public sealed class TestClientController : MonoBehaviour
         GUILayout.Label(_lastPlayerMove);
         GUILayout.Label("Arrow keys: move (click game view)");
 
-        GUI.enabled = _inGame && !_connecting && !_changingMap && !_sendingMove;
+        GUI.enabled = !_changingMap && !_sendingMove;
         GUILayout.BeginHorizontal();
         GUILayout.Label("Move X/Y", GUILayout.Width(70));
         _moveX = GUILayout.TextField(_moveX);
@@ -203,6 +178,37 @@ public sealed class TestClientController : MonoBehaviour
         }
         GUILayout.EndHorizontal();
         GUI.enabled = true;
+        GUILayout.EndArea();
+
+        DrawChatPanel(chatPanel);
+    }
+
+    private void DrawChatPanel(Rect panel)
+    {
+        if (_chatMessageStyle == null)
+        {
+            _chatMessageStyle = new GUIStyle(GUI.skin.label);
+            _chatMessageStyle.wordWrap = true;
+        }
+
+        GUILayout.BeginArea(panel, GUI.skin.box);
+        GUILayout.Label("Map Chat");
+        _chatScroll = GUILayout.BeginScrollView(_chatScroll, GUILayout.Height(110f));
+
+        foreach (string message in _chatMessages)
+            GUILayout.Label(message, _chatMessageStyle);
+
+        GUILayout.EndScrollView();
+        GUILayout.BeginHorizontal();
+        GUI.enabled = !_sendingChat;
+        GUI.SetNextControlName("MapChatInput");
+        _chatInput = GUILayout.TextField(_chatInput, GameProtocol.MaxChatMessageLength);
+
+        if (GUILayout.Button("Send", GUILayout.Width(55f)))
+            SendChat();
+
+        GUI.enabled = true;
+        GUILayout.EndHorizontal();
         GUILayout.EndArea();
     }
 
@@ -237,98 +243,8 @@ public sealed class TestClientController : MonoBehaviour
         GUI.Label(label, player.CharacterId.ToString(), _playerLabelStyle);
     }
 
-    private async void ConnectAndLogin()
-    {
-        if (!int.TryParse(_loginPort, out int port) || port < 1 || port > 65535)
-        {
-            _status = "Invalid LoginServer port.";
-            return;
-        }
-
-        _connecting = true;
-        _characters = Array.Empty<CharacterInfo>();
-
-        try
-        {
-            await _networkManager.ConnectLoginServerAsync(_host, port);
-            _status = "Connected. Sending LoginRequest.";
-            await _networkManager.SendLoginAsync(_loginId, _password);
-        }
-        catch (Exception exception)
-        {
-            _connecting = false;
-            _status = $"Login connection failed: {exception.Message}";
-        }
-    }
-
-    private async void OnLoginCompleted(LoginResult result)
-    {
-        if (result != LoginResult.Success)
-        {
-            _connecting = false;
-            _status = $"Login failed: {result}";
-            return;
-        }
-
-        try
-        {
-            _status = "Login succeeded. Requesting characters.";
-            await _networkManager.RequestCharacterListAsync();
-        }
-        catch (Exception exception)
-        {
-            _connecting = false;
-            _status = $"Character list request failed: {exception.Message}";
-        }
-    }
-
-    private void OnCharacterListReceived(CharacterListData data)
-    {
-        _connecting = false;
-        _characters = data.Result == CharacterListResult.Success ? data.Characters : Array.Empty<CharacterInfo>();
-        _status = data.Result == CharacterListResult.Success ? $"Select a character ({_characters.Length} available)." : $"Character list failed: {data.Result}";
-    }
-
-    private async void SelectCharacter(uint characterId)
-    {
-        _connecting = true;
-
-        try
-        {
-            _status = $"Selecting character {characterId}.";
-            await _networkManager.SelectCharacterAsync(characterId);
-        }
-        catch (Exception exception)
-        {
-            _connecting = false;
-            _status = $"Character selection failed: {exception.Message}";
-        }
-    }
-
-    private async void OnCharacterSelected(CharacterSelectData data)
-    {
-        if (data.Result != CharacterSelectResult.Success)
-        {
-            _connecting = false;
-            _status = $"Character selection failed: {data.Result}";
-            return;
-        }
-
-        try
-        {
-            _status = $"Connecting to GameServer port {data.GameServerPort}.";
-            await _networkManager.ConnectGameServerAsync(_host, data.GameServerPort, data.AuthKey);
-        }
-        catch (Exception exception)
-        {
-            _connecting = false;
-            _status = $"Game connection failed: {exception.Message}";
-        }
-    }
-
     private void OnEnterGameReceived(EnterGameData data)
     {
-        _connecting = false;
         _inGame = data.Result == EnterGameResult.Success;
         _changingMap = false;
         _currentMapId = _inGame ? 100000000u : 0u;
@@ -337,11 +253,77 @@ public sealed class TestClientController : MonoBehaviour
         _nextMoveSendTime = 0f;
         ++_moveVersion;
         _status = _inGame ? $"Entered as {data.Name} (ID {data.CharacterId})." : $"EnterGame failed: {data.Result}";
+
+        if (_inGame)
+        {
+            _playerNames.Clear();
+            _playerNames[data.CharacterId] = data.Name;
+            _chatMessages.Clear();
+        }
+    }
+
+    private void OnPlayerEntered(PlayerEnterData data)
+    {
+        _playerNames[data.CharacterId] = data.Name;
+    }
+
+    private void OnPlayerLeft(uint characterId)
+    {
+        _playerNames.Remove(characterId);
     }
 
     private void OnPlayerMoved(PlayerMoveData data)
     {
         _lastPlayerMove = $"Last PlayerMove: {data.CharacterId} ({data.X}, {data.Y})";
+    }
+
+    private void OnPlayerChatReceived(PlayerChatData data)
+    {
+        string name = _playerNames.TryGetValue(data.CharacterId, out string playerName) ? playerName : data.CharacterId.ToString();
+        string message = data.Message.Replace('\r', ' ').Replace('\n', ' ');
+        _chatMessages.Add($"{name}: {message}");
+
+        if (_chatMessages.Count > 40)
+            _chatMessages.RemoveAt(0);
+
+        _chatScroll.y = float.MaxValue;
+    }
+
+    private async void SendChat()
+    {
+        if (!_inGame || _sendingChat)
+            return;
+
+        string message = _chatInput.Trim().Replace('\r', ' ').Replace('\n', ' ');
+        if (message.Length == 0)
+        {
+            _chatInput = "";
+            return;
+        }
+
+        if (Encoding.UTF8.GetByteCount(message) >= GameProtocol.MaxChatMessageLength)
+        {
+            _status = "Chat message is too long (maximum 127 UTF-8 bytes).";
+            return;
+        }
+
+        _sendingChat = true;
+        _chatInput = "";
+        GUI.FocusControl(null);
+
+        try
+        {
+            await _networkManager.SendChatAsync(message);
+        }
+        catch (Exception exception)
+        {
+            _chatInput = message;
+            _status = $"Chat failed: {exception.Message}";
+        }
+        finally
+        {
+            _sendingChat = false;
+        }
     }
 
     private void SendMove()
@@ -426,6 +408,10 @@ public sealed class TestClientController : MonoBehaviour
             _moveTarget = new Vector2(data.X, data.Y);
             _currentMapId = data.MapId;
             _lastPlayerMove = "Last PlayerMove: none";
+            string localName = _playerNames.TryGetValue(_worldManager.LocalCharacterId, out string name) ? name : _worldManager.LocalCharacterId.ToString();
+            _playerNames.Clear();
+            _playerNames[_worldManager.LocalCharacterId] = localName;
+            _chatMessages.Clear();
         }
         else if (_worldManager.LocalPlayer != null)
         {
@@ -435,26 +421,18 @@ public sealed class TestClientController : MonoBehaviour
         _status = data.Result == ChangeMapResult.Success ? $"Changed to map {data.MapId} at ({data.X}, {data.Y})." : $"Map change failed: {data.Result}";
     }
 
-    private void OnLoginDisconnected()
-    {
-        if (_inGame)
-            return;
-
-        _connecting = false;
-        _characters = Array.Empty<CharacterInfo>();
-        _status = "LoginServer disconnected.";
-    }
-
     private void OnGameDisconnected()
     {
-        _connecting = false;
         _inGame = false;
         _changingMap = false;
+        _sendingChat = false;
         _moveTarget = Vector2.zero;
         ++_moveVersion;
         _currentMapId = 0;
         _lastPlayerMove = "Last PlayerMove: none";
-        _characters = Array.Empty<CharacterInfo>();
+        _playerNames.Clear();
+        _chatMessages.Clear();
+        _chatInput = "";
         _status = "GameServer disconnected.";
     }
 }
