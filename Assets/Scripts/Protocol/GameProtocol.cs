@@ -42,6 +42,12 @@ public struct PlayerMoveData
     public int Y;
 }
 
+public struct PlayerChatData
+{
+    public uint CharacterId;
+    public string Message;
+}
+
 public struct MonsterEnterData
 {
     public uint MonsterId;
@@ -142,6 +148,24 @@ public static class GameProtocol
         using PacketWriter writer = new();
         writer.Write(mapId);
         return writer.ToArray();
+    }
+
+    public static byte[] CreateChatRequest(string message)
+    {
+        using PacketWriter writer = new();
+        writer.WriteFixedString(message, MaxChatMessageLength);
+        return writer.ToArray();
+    }
+
+    public static PlayerChatData ReadPlayerChat(byte[] payload)
+    {
+        PacketReader reader = new(payload, 4 + MaxChatMessageLength);
+
+        return new PlayerChatData
+        {
+            CharacterId = reader.ReadUInt32(),
+            Message = reader.ReadFixedString(MaxChatMessageLength)
+        };
     }
 
     public static ChangeMapData ReadChangeMapResponse(byte[] payload)

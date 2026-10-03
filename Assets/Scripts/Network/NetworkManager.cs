@@ -18,6 +18,7 @@ public sealed class NetworkManager : MonoBehaviour
     public event Action<PlayerEnterData> PlayerEntered;
     public event Action<uint> PlayerLeft;
     public event Action<PlayerMoveData> PlayerMoved;
+    public event Action<PlayerChatData> PlayerChatReceived;
     public event Action<MonsterEnterData> MonsterEntered;
     public event Action<ChangeMapData> MapChanged;
     public event Action LoginDisconnected;
@@ -104,6 +105,12 @@ public sealed class NetworkManager : MonoBehaviour
         return _gameSession.SendAsync((ushort)GamePacketOpcode.ChangeMapRequest, payload);
     }
 
+    public Task SendChatAsync(string message)
+    {
+        byte[] payload = GameProtocol.CreateChatRequest(message);
+        return _gameSession.SendAsync((ushort)GamePacketOpcode.ChatRequest, payload);
+    }
+
     private void OnLoginPacketReceived(TcpSession session, ushort opcode, byte[] payload)
     {
         // Unity API와 이벤트 구독자가 메인 스레드에서 실행되도록 큐에 등록
@@ -153,6 +160,10 @@ public sealed class NetworkManager : MonoBehaviour
 
                 case GamePacketOpcode.PlayerMove:
                     PlayerMoved?.Invoke(GameProtocol.ReadPlayerMove(payload));
+                    break;
+
+                case GamePacketOpcode.PlayerChat:
+                    PlayerChatReceived?.Invoke(GameProtocol.ReadPlayerChat(payload));
                     break;
 
                 case GamePacketOpcode.ChangeMapResponse:
