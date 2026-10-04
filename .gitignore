@@ -71,6 +71,7 @@ sysinfo.txt
 mono_crash.*
 
 # Builds
+/Builds/
 *.apk
 *.aab
 *.unitypackage
@@ -104,3 +105,6 @@ InitTestScene*.unity*
 
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
+/Tests/MapLocalIntegration/bin/
+/Tests/MapLocalIntegration/obj/
+!/Tests/MapLocalIntegration/MapLocalIntegration.csproj
