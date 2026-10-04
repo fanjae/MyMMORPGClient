@@ -16,6 +16,43 @@ public enum ChangeMapResult : byte
     MapEnterFailed = 3
 }
 
+public enum MoveResult : byte
+{
+    Success = 0,
+    OutOfBounds = 1,
+    SpeedExceeded = 2,
+    MapMismatch = 3,
+    InvalidSequence = 4
+}
+
+public struct MoveRequestData
+{
+    public uint MapId;
+    public ulong Sequence;
+    public int X;
+    public int Y;
+}
+
+public struct MoveResponseData
+{
+    public ulong Sequence;
+    public uint MapId;
+    public MoveResult Result;
+    public int X;
+    public int Y;
+}
+
+public struct MapInfoData
+{
+    public uint MapId;
+    public int MinX;
+    public int MaxX;
+    public int MinY;
+    public int MaxY;
+    public uint MoveSpeed;
+    public uint MoveBurst;
+}
+
 public sealed class EnterGameData
 {
     public EnterGameResult Result;
@@ -135,12 +172,42 @@ public static class GameProtocol
         };
     }
 
-    public static byte[] CreateMoveRequest(int x, int y)
+    public static byte[] CreateMoveRequest(MoveRequestData data)
     {
         using PacketWriter writer = new();
-        writer.Write(x);
-        writer.Write(y);
+        writer.Write(data.MapId);
+        writer.Write(data.Sequence);
+        writer.Write(data.X);
+        writer.Write(data.Y);
         return writer.ToArray();
+    }
+
+    public static MoveResponseData ReadMoveResponse(byte[] payload)
+    {
+        PacketReader reader = new(payload, 8 + 4 + 1 + 4 + 4);
+        return new MoveResponseData
+        {
+            Sequence = reader.ReadUInt64(),
+            MapId = reader.ReadUInt32(),
+            Result = (MoveResult)reader.ReadByte(),
+            X = reader.ReadInt32(),
+            Y = reader.ReadInt32()
+        };
+    }
+
+    public static MapInfoData ReadMapInfo(byte[] payload)
+    {
+        PacketReader reader = new(payload, 4 + 4 + 4 + 4 + 4 + 4 + 4);
+        return new MapInfoData
+        {
+            MapId = reader.ReadUInt32(),
+            MinX = reader.ReadInt32(),
+            MaxX = reader.ReadInt32(),
+            MinY = reader.ReadInt32(),
+            MaxY = reader.ReadInt32(),
+            MoveSpeed = reader.ReadUInt32(),
+            MoveBurst = reader.ReadUInt32()
+        };
     }
 
     public static byte[] CreateChangeMapRequest(uint mapId)

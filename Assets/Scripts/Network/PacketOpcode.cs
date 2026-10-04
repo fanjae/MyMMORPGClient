@@ -20,5 +20,7 @@ public enum GamePacketOpcode : ushort
     ChangeMapResponse = 8,
     ChatRequest = 9,
     PlayerChat = 10,
-    MonsterEnterMap = 11
+    MonsterEnterMap = 11,
+    MoveResponse = 12,
+    MapInfo = 13
 }

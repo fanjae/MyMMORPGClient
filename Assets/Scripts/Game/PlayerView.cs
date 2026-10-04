@@ -38,6 +38,12 @@ public sealed class PlayerView : MonoBehaviour
     {
         ServerX = x;
         ServerY = y;
+        PredictPosition(x, y);
+    }
+
+    public void PredictPosition(int x, int y)
+    {
+        // 화면 이동 예측은 서버 확정 좌표와 구분한다.
         _targetPosition = WorldManager.ToUnityPosition(x, y);
     }
 }

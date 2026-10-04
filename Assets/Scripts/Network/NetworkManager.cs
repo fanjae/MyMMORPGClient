@@ -18,6 +18,8 @@ public sealed class NetworkManager : MonoBehaviour
     public event Action<PlayerEnterData> PlayerEntered;
     public event Action<uint> PlayerLeft;
     public event Action<PlayerMoveData> PlayerMoved;
+    public event Action<MoveResponseData> MoveCompleted;
+    public event Action<MapInfoData> MapInfoReceived;
     public event Action<PlayerChatData> PlayerChatReceived;
     public event Action<MonsterEnterData> MonsterEntered;
     public event Action<ChangeMapData> MapChanged;
@@ -93,9 +95,9 @@ public sealed class NetworkManager : MonoBehaviour
         await session.SendAsync((ushort)GamePacketOpcode.EnterGameRequest, payload);
     }
 
-    public Task SendMoveAsync(int x, int y)
+    public Task SendMoveAsync(MoveRequestData data)
     {
-        byte[] payload = GameProtocol.CreateMoveRequest(x, y);
+        byte[] payload = GameProtocol.CreateMoveRequest(data);
         return _gameSession.SendAsync((ushort)GamePacketOpcode.MoveRequest, payload);
     }
 
@@ -160,6 +162,14 @@ public sealed class NetworkManager : MonoBehaviour
 
                 case GamePacketOpcode.PlayerMove:
                     PlayerMoved?.Invoke(GameProtocol.ReadPlayerMove(payload));
+                    break;
+
+                case GamePacketOpcode.MoveResponse:
+                    MoveCompleted?.Invoke(GameProtocol.ReadMoveResponse(payload));
+                    break;
+
+                case GamePacketOpcode.MapInfo:
+                    MapInfoReceived?.Invoke(GameProtocol.ReadMapInfo(payload));
                     break;
 
                 case GamePacketOpcode.PlayerChat:

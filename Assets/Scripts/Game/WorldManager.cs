@@ -155,6 +155,12 @@ public sealed class WorldManager : MonoBehaviour
             _localPlayer.SetTargetPosition(x, y);
     }
 
+    public void PredictLocalPosition(int x, int y)
+    {
+        if (_localPlayer != null)
+            _localPlayer.PredictPosition(x, y);
+    }
+
     private PlayerView CreatePlayer(uint characterId)
     {
         if (playerPrefab != null)

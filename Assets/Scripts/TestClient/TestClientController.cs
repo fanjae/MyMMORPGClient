@@ -20,8 +20,10 @@ public sealed class TestClientController : MonoBehaviour
     private readonly List<string> _chatMessages = new();
     private readonly Dictionary<uint, string> _playerNames = new();
     private Vector2 _chatScroll;
+    private readonly LocalMovementState _movementState = new();
+    private MapInfoData _mapInfo;
+    private float _moveResponseDeadline;
 
-    private const float ArrowMoveSpeed = 80f;
     private const float MoveSendInterval = 0.05f;
 
     private uint _currentMapId;
@@ -66,6 +68,8 @@ public sealed class TestClientController : MonoBehaviour
         _networkManager.PlayerEntered += OnPlayerEntered;
         _networkManager.PlayerLeft += OnPlayerLeft;
         _networkManager.PlayerMoved += OnPlayerMoved;
+        _networkManager.MoveCompleted += OnMoveCompleted;
+        _networkManager.MapInfoReceived += OnMapInfoReceived;
         _networkManager.PlayerChatReceived += OnPlayerChatReceived;
         _networkManager.MapChanged += OnMapChanged;
         _networkManager.GameDisconnected += OnGameDisconnected;
@@ -77,6 +81,8 @@ public sealed class TestClientController : MonoBehaviour
         _networkManager.PlayerEntered -= OnPlayerEntered;
         _networkManager.PlayerLeft -= OnPlayerLeft;
         _networkManager.PlayerMoved -= OnPlayerMoved;
+        _networkManager.MoveCompleted -= OnMoveCompleted;
+        _networkManager.MapInfoReceived -= OnMapInfoReceived;
         _networkManager.PlayerChatReceived -= OnPlayerChatReceived;
         _networkManager.MapChanged -= OnMapChanged;
         _networkManager.GameDisconnected -= OnGameDisconnected;
@@ -84,6 +90,14 @@ public sealed class TestClientController : MonoBehaviour
 
     private void Update()
     {
+        if (_movementState.HasPendingMove && Time.unscaledTime >= _moveResponseDeadline)
+        {
+            _movementState.CancelMove(_movementState.PendingSequence);
+            _moveTarget = new Vector2(_movementState.ServerX, _movementState.ServerY);
+            _worldManager.SetLocalTargetPosition(_movementState.ServerX, _movementState.ServerY);
+            _status = "Move response timed out.";
+        }
+
         if (!_inGame || _changingMap || _worldManager.LocalPlayer == null || !Application.isFocused || GUIUtility.keyboardControl != 0)
             return;
 
@@ -108,9 +122,9 @@ public sealed class TestClientController : MonoBehaviour
         if (direction.sqrMagnitude > 1f)
             direction.Normalize();
 
-        _moveTarget += direction * ArrowMoveSpeed * Time.deltaTime;
+        _moveTarget += direction * _mapInfo.MoveSpeed * Time.deltaTime;
 
-        if (_sendingMove || Time.unscaledTime < _nextMoveSendTime)
+        if (_sendingMove || _movementState.HasPendingMove || Time.unscaledTime < _nextMoveSendTime)
             return;
 
         int x = Mathf.RoundToInt(_moveTarget.x);
@@ -146,6 +160,8 @@ public sealed class TestClientController : MonoBehaviour
         GUILayout.Label(_status);
         GUILayout.Label($"Map: {_currentMapId}  Local: {_worldManager.LocalCharacterId}");
         GUILayout.Label($"Remote players: {_worldManager.RemotePlayerCount}  Monsters: {_worldManager.MonsterCount}");
+        GUILayout.Label($"Bounds X: {_mapInfo.MinX}..{_mapInfo.MaxX}  Y: {_mapInfo.MinY}..{_mapInfo.MaxY}");
+        GUILayout.Label($"Move speed: {_mapInfo.MoveSpeed}  Burst: {_mapInfo.MoveBurst}");
 
         if (_worldManager.LocalPlayer != null)
             GUILayout.Label($"Local position: ({_worldManager.LocalPlayer.ServerX}, {_worldManager.LocalPlayer.ServerY})");
@@ -156,7 +172,7 @@ public sealed class TestClientController : MonoBehaviour
         GUILayout.Label(_lastPlayerMove);
         GUILayout.Label("Arrow keys: move (click game view)");
 
-        GUI.enabled = !_changingMap && !_sendingMove;
+        GUI.enabled = !_changingMap && !_sendingMove && !_movementState.HasPendingMove;
         GUILayout.BeginHorizontal();
         GUILayout.Label("Move X/Y", GUILayout.Width(70));
         _moveX = GUILayout.TextField(_moveX);
@@ -247,7 +263,9 @@ public sealed class TestClientController : MonoBehaviour
     {
         _inGame = data.Result == EnterGameResult.Success;
         _changingMap = false;
-        _currentMapId = _inGame ? 100000000u : 0u;
+        _currentMapId = 0;
+        _movementState.Reset();
+        _mapInfo = default;
         _lastPlayerMove = "Last PlayerMove: none";
         _moveTarget = new Vector2(data.X, data.Y);
         _nextMoveSendTime = 0f;
@@ -275,6 +293,29 @@ public sealed class TestClientController : MonoBehaviour
     private void OnPlayerMoved(PlayerMoveData data)
     {
         _lastPlayerMove = $"Last PlayerMove: {data.CharacterId} ({data.X}, {data.Y})";
+    }
+
+    private void OnMapInfoReceived(MapInfoData data)
+    {
+        if (!_inGame || _worldManager.LocalPlayer == null)
+            return;
+
+        _mapInfo = data;
+        _currentMapId = data.MapId;
+        _movementState.EnterMap(data.MapId, _worldManager.LocalPlayer.ServerX, _worldManager.LocalPlayer.ServerY);
+    }
+
+    private void OnMoveCompleted(MoveResponseData data)
+    {
+        if (!_inGame || _changingMap || !_movementState.TryApplyResponse(data))
+            return;
+
+        _worldManager.SetLocalTargetPosition(data.X, data.Y);
+
+        if (data.Result != MoveResult.Success)
+            _moveTarget = new Vector2(data.X, data.Y);
+
+        _status = data.Result == MoveResult.Success ? $"Move accepted: ({data.X}, {data.Y})." : $"Move rejected: {data.Result} at ({data.X}, {data.Y}).";
     }
 
     private void OnPlayerChatReceived(PlayerChatData data)
@@ -341,27 +382,32 @@ public sealed class TestClientController : MonoBehaviour
 
     private async void SendMoveAsync(int x, int y, bool showStatus)
     {
+        if (!_inGame || _changingMap || !_movementState.TryBeginMove(x, y, out MoveRequestData request))
+            return;
+
         _sendingMove = true;
+        _moveResponseDeadline = Time.unscaledTime + 5f;
         int moveVersion = _moveVersion;
+
+        // 요청 중에는 화면만 예측하고 Local position은 서버 응답으로 갱신한다.
+        _worldManager.PredictLocalPosition(x, y);
+
+        if (showStatus)
+            _status = $"Sent MoveRequest ({x}, {y}).";
 
         try
         {
-            await _networkManager.SendMoveAsync(x, y);
-
-            if (moveVersion != _moveVersion || !_inGame)
-                return;
-
-            _worldManager.SetLocalTargetPosition(x, y);
-
-            if (showStatus)
-                _status = $"Sent MoveRequest ({x}, {y}).";
+            await _networkManager.SendMoveAsync(request);
         }
         catch (Exception exception)
         {
-            if (moveVersion == _moveVersion)
+            if (moveVersion == _moveVersion && _movementState.CancelMove(request.Sequence))
             {
                 if (_worldManager.LocalPlayer != null)
+                {
                     _moveTarget = new Vector2(_worldManager.LocalPlayer.ServerX, _worldManager.LocalPlayer.ServerY);
+                    _worldManager.SetLocalTargetPosition(_movementState.ServerX, _movementState.ServerY);
+                }
 
                 _status = $"Move failed: {exception.Message}";
             }
@@ -381,12 +427,14 @@ public sealed class TestClientController : MonoBehaviour
         }
 
         _changingMap = true;
+        _movementState.CancelMove(_movementState.PendingSequence);
         ++_moveVersion;
 
         try
         {
-            await _networkManager.ChangeMapAsync(mapId);
+            // 송신 완료보다 응답 처리가 먼저 실행되어도 서버의 결과 표시가 유지되도록 한다.
             _status = $"Sent ChangeMapRequest ({mapId}).";
+            await _networkManager.ChangeMapAsync(mapId);
         }
         catch (Exception exception)
         {
@@ -402,20 +450,18 @@ public sealed class TestClientController : MonoBehaviour
     {
         _changingMap = false;
         _nextMoveSendTime = 0f;
+        _movementState.EnterMap(data.MapId, data.X, data.Y);
+        _currentMapId = data.MapId;
+        _moveTarget = new Vector2(data.X, data.Y);
+        _worldManager.SetLocalTargetPosition(data.X, data.Y);
 
         if (data.Result == ChangeMapResult.Success)
         {
-            _moveTarget = new Vector2(data.X, data.Y);
-            _currentMapId = data.MapId;
             _lastPlayerMove = "Last PlayerMove: none";
             string localName = _playerNames.TryGetValue(_worldManager.LocalCharacterId, out string name) ? name : _worldManager.LocalCharacterId.ToString();
             _playerNames.Clear();
             _playerNames[_worldManager.LocalCharacterId] = localName;
             _chatMessages.Clear();
-        }
-        else if (_worldManager.LocalPlayer != null)
-        {
-            _moveTarget = new Vector2(_worldManager.LocalPlayer.ServerX, _worldManager.LocalPlayer.ServerY);
         }
 
         _status = data.Result == ChangeMapResult.Success ? $"Changed to map {data.MapId} at ({data.X}, {data.Y})." : $"Map change failed: {data.Result}";
@@ -426,6 +472,8 @@ public sealed class TestClientController : MonoBehaviour
         _inGame = false;
         _changingMap = false;
         _sendingChat = false;
+        _movementState.Reset();
+        _mapInfo = default;
         _moveTarget = Vector2.zero;
         ++_moveVersion;
         _currentMapId = 0;
