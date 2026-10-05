@@ -1,5 +1,9 @@
 # Unity 2D 테스트 클라이언트
 
+최신 구현에서는 100000000이 발판 맵으로 전환되어 **좌우 방향키 + Space 점프**를 사용합니다. 100000001은 기존 자유 이동을 유지합니다. 최신 테스트 실행·PASS 기준·지형/입력 패킷은 [PLATFORM_NETWORK.md](../MyMMORPGServer/docs/PLATFORM_NETWORK.md)에 있습니다. 아래 기존 절차의 절대 좌표 테스트와 PASS 16 기본 실행은 문서에 설명한 임시 Free 설정에서 수행합니다. 최신 발판 테스트는 `dotnet run --project .\Tests\MapLocalIntegration\MapLocalIntegration.csproj -- --platform`입니다.
+
+2026-10-05 자동 및 Unity 두 클라이언트 검증 결과와 반복 확인 절차는 [TEST_RESULTS_2026-10-05.md](TEST_RESULTS_2026-10-05.md)에 있습니다. 지속 방향키 입력과 채팅 포커스는 사용자 확인을 받아 기록했습니다.
+
 이 절차는 `LoginServer → 캐릭터 선택 → GameServer 인증 → Map-local 상태`를 두 클라이언트로 확인합니다. 화면은 실제 게임 리소스 대신 사각형 Sprite를 사용합니다.
 
 - 청록색 사각형: Character ID `1001`인 Player (어느 클라이언트에서 보아도 동일)
