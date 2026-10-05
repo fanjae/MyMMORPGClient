@@ -7,6 +7,8 @@ internal static class Program
     private static async Task<int> Main(string[] args)
     {
         bool trace = args.Contains("--trace");
+        if (args.Contains("--platform"))
+            return await PlatformIntegration.RunAsync(args.FirstOrDefault(arg => arg.StartsWith("--physics-trace="))?.Substring("--physics-trace=".Length));
 
         try
         {
@@ -386,6 +388,16 @@ internal sealed class ClientPeer : IDisposable
         Program.Check(_mapInfo.MapId == expectedMapId && _mapInfo.MoveSpeed == 80 && _mapInfo.MoveBurst == 12, $"{_name}: map settings");
         Program.Check(_mapInfo.MinX <= X && X <= _mapInfo.MaxX && _mapInfo.MinY <= Y && Y <= _mapInfo.MaxY, $"{_name}: spawn outside bounds");
         MapId = _mapInfo.MapId;
+        MapGeometryData geometry = PlatformProtocol.ReadGeometry(await _game.ReceiveAsync((ushort)GamePacketOpcode.MapGeometry));
+        Program.Check(geometry.Mode == MovementMode.Free, "Legacy movement tests require the documented Free fixture; use --platform for production geometry");
+        Program.Check(geometry.MapId == MapId, "Geometry map mismatch");
+        for (int i = 0; i < geometry.FootholdCount; ++i)
+            PlatformProtocol.AddFoothold(geometry, await _game.ReceiveAsync((ushort)GamePacketOpcode.Foothold));
+
+        for (int i = 0; i < geometry.ColliderCount; ++i)
+            PlatformProtocol.AddCollider(geometry, await _game.ReceiveAsync((ushort)GamePacketOpcode.Collider));
+
+        PlatformProtocol.Complete(geometry, await _game.ReceiveAsync((ushort)GamePacketOpcode.GeometryEnd));
     }
 
     internal async Task ReadMoveAsync(ClientPeer player)

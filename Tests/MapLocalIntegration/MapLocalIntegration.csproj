@@ -7,6 +7,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="PlatformIntegration.cs" />
+    <Compile Include="../../Assets/Scripts/Game/PlatformSimulation.cs" Link="Game/PlatformSimulation.cs" />
+    <Compile Include="../../Assets/Scripts/Protocol/PlatformProtocol.cs" Link="Protocol/PlatformProtocol.cs" />
     <Compile Include="../../Assets/Scripts/Game/LocalMovementState.cs" Link="Game/LocalMovementState.cs" />
     <Compile Include="../../Assets/Scripts/Network/TcpSession.cs" Link="Network/TcpSession.cs" />
     <Compile Include="../../Assets/Scripts/Network/PacketReader.cs" Link="Network/PacketReader.cs" />
