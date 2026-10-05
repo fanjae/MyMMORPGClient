@@ -5,7 +5,8 @@ public enum EnterGameResult : byte
     AlreadyAuthenticated = 2,
     CharacterLoadFailed = 3,
     AlreadyInGame = 4,
-    MapEnterFailed = 5
+    MapEnterFailed = 5,
+    ProtocolMismatch = 6
 }
 
 public enum ChangeMapResult : byte
@@ -22,7 +23,8 @@ public enum MoveResult : byte
     OutOfBounds = 1,
     SpeedExceeded = 2,
     MapMismatch = 3,
-    InvalidSequence = 4
+    InvalidSequence = 4,
+    WrongMovementMode = 5
 }
 
 public struct MoveRequestData
@@ -110,6 +112,7 @@ public static class GameProtocol
     {
         using PacketWriter writer = new();
         writer.Write(authKey);
+        writer.Write(2u);
         return writer.ToArray();
     }
 

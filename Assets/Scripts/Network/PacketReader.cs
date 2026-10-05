@@ -39,6 +39,11 @@ public sealed class PacketReader
         return _reader.ReadInt32();
     }
 
+    public long ReadInt64()
+    {
+        return _reader.ReadInt64();
+    }
+
     public string ReadFixedString(int byteLength)
     {
         byte[] bytes = _reader.ReadBytes(byteLength);

@@ -8,6 +8,7 @@ public sealed class TestClientController : MonoBehaviour
 {
     private NetworkManager _networkManager;
     private WorldManager _worldManager;
+    private PlatformMovementController _platformMovement;
 
     private string _moveX = "120";
     private string _moveY = "45";
@@ -45,6 +46,7 @@ public sealed class TestClientController : MonoBehaviour
         GameObject gameObject = new("Test Client");
         gameObject.AddComponent<NetworkManager>();
         gameObject.AddComponent<WorldManager>();
+        gameObject.AddComponent<PlatformMovementController>();
         gameObject.AddComponent<LoginScreenController>();
         gameObject.AddComponent<TestClientController>();
     }
@@ -53,6 +55,9 @@ public sealed class TestClientController : MonoBehaviour
     {
         _networkManager = GetComponent<NetworkManager>();
         _worldManager = GetComponent<WorldManager>();
+        _platformMovement = GetComponent<PlatformMovementController>();
+        if (_platformMovement == null)
+            _platformMovement = gameObject.AddComponent<PlatformMovementController>();
 
         // 두 클라이언트를 번갈아 조작해도 비활성 창의 패킷 처리가 계속되도록 한다.
         Application.runInBackground = true;
@@ -90,6 +95,9 @@ public sealed class TestClientController : MonoBehaviour
 
     private void Update()
     {
+        _platformMovement.InputAllowed = _inGame && !_changingMap;
+        if (_platformMovement.IsPlatformer || !_platformMovement.GeometryReady)
+            return;
         if (_movementState.HasPendingMove && Time.unscaledTime >= _moveResponseDeadline)
         {
             _movementState.CancelMove(_movementState.PendingSequence);
@@ -170,19 +178,21 @@ public sealed class TestClientController : MonoBehaviour
             GUILayout.Label($"Remote {player.CharacterId}: ({player.ServerX}, {player.ServerY})");
 
         GUILayout.Label(_lastPlayerMove);
-        GUILayout.Label("Arrow keys: move (click game view)");
+        GUILayout.Label(_platformMovement.IsPlatformer ? $"Left/Right + Space: jump ({_platformMovement.LastReason})" : "Arrow keys: move (click game view)");
 
         GUI.enabled = !_changingMap && !_sendingMove && !_movementState.HasPendingMove;
         GUILayout.BeginHorizontal();
         GUILayout.Label("Move X/Y", GUILayout.Width(70));
         _moveX = GUILayout.TextField(_moveX);
         _moveY = GUILayout.TextField(_moveY);
+        GUI.enabled = GUI.enabled && !_platformMovement.IsPlatformer;
         if (GUILayout.Button("Send", GUILayout.Width(55)))
         {
             GUI.FocusControl(null);
             SendMove();
         }
         GUILayout.EndHorizontal();
+        GUI.enabled = !_changingMap;
 
         GUILayout.BeginHorizontal();
         GUILayout.Label("Map ID", GUILayout.Width(70));

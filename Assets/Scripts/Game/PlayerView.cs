@@ -5,6 +5,10 @@ public sealed class PlayerView : MonoBehaviour
     public uint CharacterId { get; private set; }
     public int ServerX { get; private set; }
     public int ServerY { get; private set; }
+    public double ExactServerX { get; private set; }
+    public double ExactServerY { get; private set; }
+    private ulong _lastTick;
+    private bool _hasSnapshot;
 
     private Vector3 _targetPosition;
     private const float InterpolationSpeed = 12f;
@@ -30,6 +34,8 @@ public sealed class PlayerView : MonoBehaviour
         // 서버 좌표를 Unity 월드 좌표로 변환
         ServerX = x;
         ServerY = y;
+        ExactServerX = x;
+        ExactServerY = y;
         _targetPosition = WorldManager.ToUnityPosition(x, y);
         transform.position = _targetPosition;
     }
@@ -38,6 +44,8 @@ public sealed class PlayerView : MonoBehaviour
     {
         ServerX = x;
         ServerY = y;
+        ExactServerX = x;
+        ExactServerY = y;
         PredictPosition(x, y);
     }
 
@@ -45,5 +53,34 @@ public sealed class PlayerView : MonoBehaviour
     {
         // 화면 이동 예측은 서버 확정 좌표와 구분한다.
         _targetPosition = WorldManager.ToUnityPosition(x, y);
+    }
+
+    public void PredictPosition(double x, double y)
+    {
+        _targetPosition = WorldManager.ToUnityPosition(x, y);
+    }
+
+    public void ResetSnapshots()
+    {
+        _hasSnapshot = false;
+        _lastTick = 0;
+    }
+
+    public void ApplySnapshot(MovementSnapshot state, bool local)
+    {
+        if (_hasSnapshot && (state.ServerTick < _lastTick || (state.ServerTick == _lastTick && state.Reason == MovementStateReason.Normal)))
+            return;
+
+        _hasSnapshot = true;
+        _lastTick = state.ServerTick;
+        ExactServerX = state.X;
+        ExactServerY = state.Y;
+        ServerX = (int)System.Math.Round(state.X, System.MidpointRounding.AwayFromZero);
+        ServerY = (int)System.Math.Round(state.Y, System.MidpointRounding.AwayFromZero);
+        if (!local || state.Reason != MovementStateReason.Normal)
+            PredictPosition(state.X, state.Y);
+
+        if (state.Reason == MovementStateReason.Respawned || (transform.position - WorldManager.ToUnityPosition(state.X, state.Y)).sqrMagnitude > 4f)
+            transform.position = WorldManager.ToUnityPosition(state.X, state.Y);
     }
 }

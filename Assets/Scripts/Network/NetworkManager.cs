@@ -9,6 +9,8 @@ public sealed class NetworkManager : MonoBehaviour
 
     private TcpSession _loginSession;
     private TcpSession _gameSession;
+    private MapGeometryData _pendingGeometry;
+    private MapInfoData _mapBounds;
 
     public event Action<LoginResult> LoginCompleted;
     public event Action<CharacterListData> CharacterListReceived;
@@ -20,6 +22,8 @@ public sealed class NetworkManager : MonoBehaviour
     public event Action<PlayerMoveData> PlayerMoved;
     public event Action<MoveResponseData> MoveCompleted;
     public event Action<MapInfoData> MapInfoReceived;
+    public event Action<MapGeometryData> GeometryReceived;
+    public event Action<MovementSnapshot> MovementReceived;
     public event Action<PlayerChatData> PlayerChatReceived;
     public event Action<MonsterEnterData> MonsterEntered;
     public event Action<ChangeMapData> MapChanged;
@@ -34,6 +38,16 @@ public sealed class NetworkManager : MonoBehaviour
             try
             {
                 action();
+            }
+            catch (System.IO.InvalidDataException exception)
+            {
+                _pendingGeometry = null;
+                TcpSession session = _gameSession;
+                _gameSession = null;
+                session?.Dispose();
+                if (session != null)
+                    GameDisconnected?.Invoke();
+                Debug.LogException(exception);
             }
             catch (Exception exception)
             {
@@ -81,6 +95,7 @@ public sealed class NetworkManager : MonoBehaviour
         _gameSession?.Dispose();
         TcpSession session = new();
         _gameSession = session;
+        _pendingGeometry = null;
         session.PacketReceived += (opcode, payload) => OnGamePacketReceived(session, opcode, payload);
         session.Disconnected += () => _mainThreadQueue.Enqueue(() =>
         {
@@ -105,6 +120,11 @@ public sealed class NetworkManager : MonoBehaviour
     {
         byte[] payload = GameProtocol.CreateChangeMapRequest(mapId);
         return _gameSession.SendAsync((ushort)GamePacketOpcode.ChangeMapRequest, payload);
+    }
+
+    public Task SendMovementInputAsync(MovementInputData data)
+    {
+        return _gameSession.SendAsync((ushort)GamePacketOpcode.MovementInput, PlatformProtocol.CreateInput(data));
     }
 
     public Task SendChatAsync(string message)
@@ -169,7 +189,35 @@ public sealed class NetworkManager : MonoBehaviour
                     break;
 
                 case GamePacketOpcode.MapInfo:
-                    MapInfoReceived?.Invoke(GameProtocol.ReadMapInfo(payload));
+                    _mapBounds = GameProtocol.ReadMapInfo(payload);
+                    _pendingGeometry = null;
+                    MapInfoReceived?.Invoke(_mapBounds);
+                    break;
+
+                case GamePacketOpcode.MapGeometry:
+                    _pendingGeometry = PlatformProtocol.ReadGeometry(payload);
+                    if (_pendingGeometry.MapId != _mapBounds.MapId)
+                        throw new System.IO.InvalidDataException("Geometry without matching MapInfo");
+
+                    _pendingGeometry.Bounds = _mapBounds;
+                    break;
+
+                case GamePacketOpcode.Foothold:
+                    PlatformProtocol.AddFoothold(_pendingGeometry, payload);
+                    break;
+
+                case GamePacketOpcode.Collider:
+                    PlatformProtocol.AddCollider(_pendingGeometry, payload);
+                    break;
+
+                case GamePacketOpcode.GeometryEnd:
+                    PlatformProtocol.Complete(_pendingGeometry, payload);
+                    GeometryReceived?.Invoke(_pendingGeometry);
+                    _pendingGeometry = null;
+                    break;
+
+                case GamePacketOpcode.MovementState:
+                    MovementReceived?.Invoke(PlatformProtocol.ReadState(payload));
                     break;
 
                 case GamePacketOpcode.PlayerChat:

@@ -22,5 +22,11 @@ public enum GamePacketOpcode : ushort
     PlayerChat = 10,
     MonsterEnterMap = 11,
     MoveResponse = 12,
-    MapInfo = 13
+    MapInfo = 13,
+    MovementInput = 14,
+    MovementState = 15,
+    MapGeometry = 16,
+    Foothold = 17,
+    Collider = 18,
+    GeometryEnd = 19
 }

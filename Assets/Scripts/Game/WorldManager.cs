@@ -9,6 +9,8 @@ public sealed class WorldManager : MonoBehaviour
 
     private readonly Dictionary<uint, PlayerView> _players = new();
     private readonly Dictionary<uint, MonsterView> _monsters = new();
+    private readonly List<GameObject> _terrain = new();
+    private MapGeometryData _geometry;
 
     private PlayerView _localPlayer;
     private static Sprite _testSprite;
@@ -45,6 +47,8 @@ public sealed class WorldManager : MonoBehaviour
         networkManager.MonsterEntered += OnMonsterEntered;
         networkManager.MapChanged += OnMapChanged;
         networkManager.GameDisconnected += OnGameDisconnected;
+        networkManager.GeometryReceived += OnGeometry;
+        networkManager.MovementReceived += OnMovementState;
     }
 
     private void OnDisable()
@@ -57,6 +61,8 @@ public sealed class WorldManager : MonoBehaviour
         networkManager.MonsterEntered -= OnMonsterEntered;
         networkManager.MapChanged -= OnMapChanged;
         networkManager.GameDisconnected -= OnGameDisconnected;
+        networkManager.GeometryReceived -= OnGeometry;
+        networkManager.MovementReceived -= OnMovementState;
     }
 
     private void OnEnterGame(EnterGameData data)
@@ -128,6 +134,11 @@ public sealed class WorldManager : MonoBehaviour
 
     private void ClearRemoteObjects()
     {
+        foreach (GameObject terrain in _terrain)
+            Destroy(terrain);
+
+        _terrain.Clear();
+        _geometry = null;
         // 현재 맵에서 관리하던 원격 플레이어와 몬스터 제거
         foreach (PlayerView player in _players.Values)
             Destroy(player.gameObject);
@@ -167,6 +178,8 @@ public sealed class WorldManager : MonoBehaviour
             return Instantiate(playerPrefab);
 
         GameObject gameObject = CreateTestObject($"Player {characterId}", GetPlayerColor(characterId));
+        if (_geometry != null)
+            gameObject.transform.localScale = new Vector3(_geometry.HalfWidth * 0.1f, _geometry.HalfHeight * 0.1f, 1f);
         return gameObject.AddComponent<PlayerView>();
     }
 
@@ -219,5 +232,46 @@ public sealed class WorldManager : MonoBehaviour
     {
         // 서버의 2차원 좌표를 Unity XY 평면 좌표로 변환
         return new Vector3(x * 0.05f, y * 0.05f, 0f);
+    }
+
+    public static Vector3 ToUnityPosition(double x, double y)
+    {
+        return new Vector3((float)(x * 0.05), (float)(y * 0.05), 0);
+    }
+
+    private void OnGeometry(MapGeometryData geometry)
+    {
+        _geometry = geometry;
+        if (_localPlayer != null)
+        {
+            _localPlayer.ResetSnapshots();
+            _localPlayer.transform.localScale = new Vector3(geometry.HalfWidth * 0.1f, geometry.HalfHeight * 0.1f, 1f);
+        }
+
+        foreach (ColliderData collider in geometry.Colliders.Values)
+            AddTerrain($"Collider {collider.Id}", ((double)collider.MinX + collider.MaxX) / 2, ((double)collider.MinY + collider.MaxY) / 2, (double)collider.MaxX - collider.MinX, (double)collider.MaxY - collider.MinY, new Color(0.3f, 0.4f, 0.5f));
+
+        foreach (FootholdData foothold in geometry.Footholds.Values)
+            AddTerrain($"Foothold {foothold.Id}", ((double)foothold.X1 + foothold.X2) / 2, foothold.Y1 - 0.5, (double)foothold.X2 - foothold.X1, 1, Color.green);
+    }
+
+    private void AddTerrain(string name, double x, double y, double width, double height, Color color)
+    {
+        GameObject terrain = CreateTestObject(name, color);
+        terrain.transform.position = ToUnityPosition(x, y);
+        terrain.transform.localScale = new Vector3((float)(width * 0.05), (float)(height * 0.05), 1);
+        terrain.GetComponent<SpriteRenderer>().sortingOrder = -1;
+        _terrain.Add(terrain);
+    }
+
+    private void OnMovementState(MovementSnapshot state)
+    {
+        if (_geometry == null || state.MapId != _geometry.MapId || state.Generation != _geometry.Generation)
+            return;
+
+        if (state.CharacterId == LocalCharacterId)
+            _localPlayer.ApplySnapshot(state, true);
+        else if (_players.TryGetValue(state.CharacterId, out PlayerView player))
+            player.ApplySnapshot(state, false);
     }
 }
