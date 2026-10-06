@@ -5,7 +5,9 @@ using UnityEngine;
 
 public sealed class NetworkManager : MonoBehaviour
 {
-    private readonly ConcurrentQueue<Action> _mainThreadQueue = new();
+    private readonly MainThreadPacketQueue _mainThreadQueue = new();
+    private readonly ConcurrentQueue<Action> _disconnectQueue = new();
+    private const int MaxPacketsPerFrame = 256;
 
     private TcpSession _loginSession;
     private TcpSession _gameSession;
@@ -25,6 +27,8 @@ public sealed class NetworkManager : MonoBehaviour
     public event Action<MapGeometryData> GeometryReceived;
     public event Action<MovementSnapshot> MovementReceived;
     public event Action<PlayerChatData> PlayerChatReceived;
+    public event Action<WhisperData> WhisperReceived;
+    public event Action<ChatResponseData> ChatRejected;
     public event Action<MonsterEnterData> MonsterEntered;
     public event Action<ChangeMapData> MapChanged;
     public event Action LoginDisconnected;
@@ -32,22 +36,15 @@ public sealed class NetworkManager : MonoBehaviour
 
     private void Update()
     {
-        // 네트워크 수신 스레드에서 등록한 작업을 Unity 메인 스레드에서 처리
-        while (_mainThreadQueue.TryDequeue(out Action action))
+        while (_disconnectQueue.TryDequeue(out Action disconnected))
+            disconnected();
+
+        // 한 프레임에 처리할 패킷 수를 제한해 누적 수신이 화면 갱신을 막지 않도록 한다.
+        for (int count = 0; count < MaxPacketsPerFrame && _mainThreadQueue.TryDequeue(out Action action); ++count)
         {
             try
             {
                 action();
-            }
-            catch (System.IO.InvalidDataException exception)
-            {
-                _pendingGeometry = null;
-                TcpSession session = _gameSession;
-                _gameSession = null;
-                session?.Dispose();
-                if (session != null)
-                    GameDisconnected?.Invoke();
-                Debug.LogException(exception);
             }
             catch (Exception exception)
             {
@@ -63,13 +60,11 @@ public sealed class NetworkManager : MonoBehaviour
         TcpSession session = new();
         _loginSession = session;
         session.PacketReceived += (opcode, payload) => OnLoginPacketReceived(session, opcode, payload);
-        session.Disconnected += () => _mainThreadQueue.Enqueue(() =>
-        {
-            if (ReferenceEquals(_loginSession, session))
-                LoginDisconnected?.Invoke();
-        });
+        session.Disconnected += () => _disconnectQueue.Enqueue(() => DisconnectSession(session, false));
 
         await session.ConnectAsync(host, port);
+        if (!ReferenceEquals(_loginSession, session))
+            throw new OperationCanceledException();
     }
 
     public Task SendLoginAsync(string loginId, string password)
@@ -97,13 +92,11 @@ public sealed class NetworkManager : MonoBehaviour
         _gameSession = session;
         _pendingGeometry = null;
         session.PacketReceived += (opcode, payload) => OnGamePacketReceived(session, opcode, payload);
-        session.Disconnected += () => _mainThreadQueue.Enqueue(() =>
-        {
-            if (ReferenceEquals(_gameSession, session))
-                GameDisconnected?.Invoke();
-        });
+        session.Disconnected += () => _disconnectQueue.Enqueue(() => DisconnectSession(session, true));
 
         await session.ConnectAsync(host, port);
+        if (!ReferenceEquals(_gameSession, session))
+            throw new OperationCanceledException();
 
         // 로그인 서버에서 발급받은 인증 키로 게임 서버 입장 요청
         byte[] payload = GameProtocol.CreateEnterGameRequest(authKey);
@@ -133,10 +126,15 @@ public sealed class NetworkManager : MonoBehaviour
         return _gameSession.SendAsync((ushort)GamePacketOpcode.ChatRequest, payload);
     }
 
+    public Task SendWhisperAsync(uint targetCharacterId, string message)
+    {
+        return _gameSession.SendAsync((ushort)GamePacketOpcode.WhisperRequest, GameProtocol.CreateWhisperRequest(targetCharacterId, message));
+    }
+
     private void OnLoginPacketReceived(TcpSession session, ushort opcode, byte[] payload)
     {
         // Unity API와 이벤트 구독자가 메인 스레드에서 실행되도록 큐에 등록
-        _mainThreadQueue.Enqueue(() =>
+        EnqueuePacket(session, false, payload.Length + TcpSession.HeaderSize, () =>
         {
             if (!ReferenceEquals(_loginSession, session))
                 return;
@@ -161,7 +159,7 @@ public sealed class NetworkManager : MonoBehaviour
     private void OnGamePacketReceived(TcpSession session, ushort opcode, byte[] payload)
     {
         // 게임 서버 패킷도 메인 스레드에서 역직렬화 후 이벤트로 전달
-        _mainThreadQueue.Enqueue(() =>
+        EnqueuePacket(session, true, payload.Length + TcpSession.HeaderSize, () =>
         {
             if (!ReferenceEquals(_gameSession, session))
                 return;
@@ -223,6 +221,12 @@ public sealed class NetworkManager : MonoBehaviour
                 case GamePacketOpcode.PlayerChat:
                     PlayerChatReceived?.Invoke(GameProtocol.ReadPlayerChat(payload));
                     break;
+                case GamePacketOpcode.WhisperMessage:
+                    WhisperReceived?.Invoke(GameProtocol.ReadWhisper(payload));
+                    break;
+                case GamePacketOpcode.ChatResponse:
+                    ChatRejected?.Invoke(GameProtocol.ReadChatResponse(payload));
+                    break;
 
                 case GamePacketOpcode.ChangeMapResponse:
                     MapChanged?.Invoke(GameProtocol.ReadChangeMapResponse(payload));
@@ -233,6 +237,49 @@ public sealed class NetworkManager : MonoBehaviour
                     break;
             }
         });
+    }
+
+    private void EnqueuePacket(TcpSession session, bool game, int bytes, Action action)
+    {
+        if (!_mainThreadQueue.TryEnqueue(() =>
+        {
+            try { action(); }
+            catch (System.IO.InvalidDataException exception)
+            {
+                DisconnectSession(session, game);
+                Debug.LogException(exception);
+            }
+        }, bytes))
+        {
+            // 큐에 넣지 못한 연결만 종료하고 이전에 누적된 패킷은 세션 검사로 무시한다.
+            session.Dispose();
+            _disconnectQueue.Enqueue(() => DisconnectSession(session, game));
+        }
+    }
+
+    private void DisconnectSession(TcpSession session, bool game)
+    {
+        if (game && ReferenceEquals(_gameSession, session))
+        {
+            _gameSession = null;
+            _pendingGeometry = null;
+            session.Dispose();
+            GameDisconnected?.Invoke();
+        }
+        else if (!game && ReferenceEquals(_loginSession, session))
+        {
+            _loginSession = null;
+            session.Dispose();
+            LoginDisconnected?.Invoke();
+        }
+    }
+
+    public void DisconnectAll()
+    {
+        if (_loginSession != null)
+            DisconnectSession(_loginSession, false);
+        if (_gameSession != null)
+            DisconnectSession(_gameSession, true);
     }
 
     private void OnDestroy()

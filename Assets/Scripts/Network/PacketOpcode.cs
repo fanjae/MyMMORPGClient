@@ -28,5 +28,8 @@ public enum GamePacketOpcode : ushort
     MapGeometry = 16,
     Foothold = 17,
     Collider = 18,
-    GeometryEnd = 19
+    GeometryEnd = 19,
+    WhisperRequest = 20,
+    ChatResponse = 21,
+    WhisperMessage = 22
 }

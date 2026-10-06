@@ -6,7 +6,8 @@ public enum EnterGameResult : byte
     CharacterLoadFailed = 3,
     AlreadyInGame = 4,
     MapEnterFailed = 5,
-    ProtocolMismatch = 6
+    ProtocolMismatch = 6,
+    AuthenticationPending = 7
 }
 
 public enum ChangeMapResult : byte
@@ -87,6 +88,26 @@ public struct PlayerChatData
     public string Message;
 }
 
+public enum ChatOperation : byte { Map = 0, Whisper = 1 }
+public enum ChatResult : byte { InvalidMessage = 0, RateLimited = 1, TargetNotFound = 2, DeliveryFailed = 3, InvalidTarget = 4 }
+
+public struct ChatResponseData
+{
+    public ChatOperation Operation;
+    public ChatResult Result;
+    public uint TargetCharacterId;
+    public uint RetryAfterMs;
+}
+
+public sealed class WhisperData
+{
+    public uint SenderCharacterId;
+    public uint TargetCharacterId;
+    public string SenderName;
+    public string TargetName;
+    public string Message;
+}
+
 public struct MonsterEnterData
 {
     public uint MonsterId;
@@ -104,7 +125,8 @@ public struct ChangeMapData
 
 public static class GameProtocol
 {
-    public const int MaxPlayerNameLength = 16;
+    public const int MaxPlayerNameLength = LoginProtocol.MaxCharacterNameLength;
+    public const uint ProtocolVersion = 4;
     public const int MaxChatMessageLength = 128;
     private const int PlayerDataSize = 4 + MaxPlayerNameLength + 2 + 4 + 4;
 
@@ -112,7 +134,7 @@ public static class GameProtocol
     {
         using PacketWriter writer = new();
         writer.Write(authKey);
-        writer.Write(2u);
+        writer.Write(ProtocolVersion);
         return writer.ToArray();
     }
 
@@ -234,6 +256,38 @@ public static class GameProtocol
         return new PlayerChatData
         {
             CharacterId = reader.ReadUInt32(),
+            Message = reader.ReadFixedString(MaxChatMessageLength)
+        };
+    }
+
+    public static byte[] CreateWhisperRequest(uint targetCharacterId, string message)
+    {
+        using PacketWriter writer = new();
+        writer.Write(targetCharacterId);
+        writer.WriteFixedString(message, MaxChatMessageLength);
+        return writer.ToArray();
+    }
+
+    public static ChatResponseData ReadChatResponse(byte[] payload)
+    {
+        PacketReader reader = new(payload, 10);
+        ChatResponseData response = new()
+        {
+            Operation = (ChatOperation)reader.ReadByte(), Result = (ChatResult)reader.ReadByte(),
+            TargetCharacterId = reader.ReadUInt32(), RetryAfterMs = reader.ReadUInt32()
+        };
+        if (response.Operation > ChatOperation.Whisper || response.Result > ChatResult.InvalidTarget)
+            throw new System.IO.InvalidDataException("Invalid chat response.");
+        return response;
+    }
+
+    public static WhisperData ReadWhisper(byte[] payload)
+    {
+        PacketReader reader = new(payload, 8 + MaxPlayerNameLength * 2 + MaxChatMessageLength);
+        return new WhisperData
+        {
+            SenderCharacterId = reader.ReadUInt32(), TargetCharacterId = reader.ReadUInt32(),
+            SenderName = reader.ReadFixedString(MaxPlayerNameLength), TargetName = reader.ReadFixedString(MaxPlayerNameLength),
             Message = reader.ReadFixedString(MaxChatMessageLength)
         };
     }

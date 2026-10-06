@@ -4,7 +4,8 @@ public enum LoginResult : byte
 {
     Success = 0,
     InvalidCredential = 1,
-    ServerError = 2
+    ServerError = 2,
+    ProtocolMismatch = 3
 }
 
 public enum CharacterListResult : byte
@@ -44,7 +45,8 @@ public static class LoginProtocol
 {
     public const int MaxLoginIdLength = 32;
     public const int MaxPasswordLength = 64;
-    public const int MaxCharacterNameLength = 16;
+    public const int MaxCharacterNameLength = 65;
+    public const uint ProtocolVersion = 2;
     public const int MaxCharacterCount = 3;
 
     public static byte[] CreateLoginRequest(string loginId, string password)
@@ -52,6 +54,7 @@ public static class LoginProtocol
         using PacketWriter writer = new();
         writer.WriteFixedString(loginId, MaxLoginIdLength);
         writer.WriteFixedString(password, MaxPasswordLength);
+        writer.Write(ProtocolVersion);
         return writer.ToArray();
     }
 

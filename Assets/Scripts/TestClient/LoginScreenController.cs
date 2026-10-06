@@ -12,6 +12,22 @@ public sealed class LoginScreenController : MonoBehaviour
     private CharacterInfo[] _characters = Array.Empty<CharacterInfo>();
     private bool _connecting;
     private bool _inGame;
+    private float _responseDeadline;
+    private int _attempt;
+    private string _connectedHost;
+
+    private void Update()
+    {
+        if (_connecting && Time.unscaledTime >= _responseDeadline)
+        {
+            // 연결은 유지되지만 응답이 없는 경우에도 다시 로그인할 수 있게 상태를 정리한다.
+            _networkManager.DisconnectAll();
+            ++_attempt;
+            _connecting = false;
+            _characters = Array.Empty<CharacterInfo>();
+            _status = "Server response timed out. Connect again to continue.";
+        }
+    }
 
     private void Awake()
     {
@@ -103,23 +119,32 @@ public sealed class LoginScreenController : MonoBehaviour
         }
 
         _connecting = true;
+        _responseDeadline = Time.unscaledTime + 10f;
+        int attempt = ++_attempt;
+        string host = _host.Trim();
         _characters = Array.Empty<CharacterInfo>();
 
         try
         {
-            await _networkManager.ConnectLoginServerAsync(_host, port);
+            await _networkManager.ConnectLoginServerAsync(host, port);
+            if (attempt != _attempt)
+                return;
+            _connectedHost = host;
             _status = "Connected. Sending LoginRequest.";
             await _networkManager.SendLoginAsync(_loginId, _password);
         }
         catch (Exception exception)
         {
+            if (attempt != _attempt)
+                return;
             _connecting = false;
-            _status = $"Login connection failed: {exception.Message}";
+            _status = ConnectionError.Describe(exception, host, port, "LoginServer");
         }
     }
 
     private async void OnLoginCompleted(LoginResult result)
     {
+        int attempt = _attempt;
         if (result != LoginResult.Success)
         {
             _connecting = false;
@@ -130,11 +155,14 @@ public sealed class LoginScreenController : MonoBehaviour
         try
         {
             _password = "";
+            _responseDeadline = Time.unscaledTime + 10f;
             _status = "Login succeeded. Requesting characters.";
             await _networkManager.RequestCharacterListAsync();
         }
         catch (Exception exception)
         {
+            if (attempt != _attempt)
+                return;
             _connecting = false;
             _status = $"Character list request failed: {exception.Message}";
         }
@@ -150,6 +178,8 @@ public sealed class LoginScreenController : MonoBehaviour
     private async void SelectCharacter(uint characterId)
     {
         _connecting = true;
+        _responseDeadline = Time.unscaledTime + 10f;
+        int attempt = _attempt;
 
         try
         {
@@ -158,6 +188,8 @@ public sealed class LoginScreenController : MonoBehaviour
         }
         catch (Exception exception)
         {
+            if (attempt != _attempt)
+                return;
             _connecting = false;
             _status = $"Character selection failed: {exception.Message}";
         }
@@ -165,6 +197,7 @@ public sealed class LoginScreenController : MonoBehaviour
 
     private async void OnCharacterSelected(CharacterSelectData data)
     {
+        int attempt = _attempt;
         if (data.Result != CharacterSelectResult.Success)
         {
             _connecting = false;
@@ -174,13 +207,17 @@ public sealed class LoginScreenController : MonoBehaviour
 
         try
         {
+            _responseDeadline = Time.unscaledTime + 10f;
             _status = $"Connecting to GameServer port {data.GameServerPort}.";
-            await _networkManager.ConnectGameServerAsync(_host, data.GameServerPort, data.AuthKey);
+            // 로그인 뒤 Host 입력이 바뀌어도 인증받은 서버 주소로 게임 연결을 진행한다.
+            await _networkManager.ConnectGameServerAsync(_connectedHost, data.GameServerPort, data.AuthKey);
         }
         catch (Exception exception)
         {
+            if (attempt != _attempt)
+                return;
             _connecting = false;
-            _status = $"Game connection failed: {exception.Message}";
+            _status = ConnectionError.Describe(exception, _connectedHost, data.GameServerPort, "GameServer");
         }
     }
 
@@ -199,6 +236,7 @@ public sealed class LoginScreenController : MonoBehaviour
         _connecting = false;
         _characters = Array.Empty<CharacterInfo>();
         _status = "LoginServer disconnected.";
+        ++_attempt;
     }
 
     private void OnGameDisconnected()
@@ -207,5 +245,6 @@ public sealed class LoginScreenController : MonoBehaviour
         _inGame = false;
         _characters = Array.Empty<CharacterInfo>();
         _status = "GameServer disconnected. Connect again to continue.";
+        ++_attempt;
     }
 }

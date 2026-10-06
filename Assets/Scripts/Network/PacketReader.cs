@@ -5,6 +5,7 @@ using System.Text;
 public sealed class PacketReader
 {
     private readonly BinaryReader _reader;
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
     public PacketReader(byte[] data, int expectedLength)
     {
@@ -52,8 +53,15 @@ public sealed class PacketReader
         int length = Array.IndexOf(bytes, (byte)0);
 
         if (length < 0)
-            length = bytes.Length;
+            throw new InvalidDataException("Fixed string is not null terminated.");
 
-        return Encoding.UTF8.GetString(bytes, 0, length);
+        try
+        {
+            return StrictUtf8.GetString(bytes, 0, length);
+        }
+        catch (DecoderFallbackException exception)
+        {
+            throw new InvalidDataException("Invalid UTF-8 string.", exception);
+        }
     }
 }
