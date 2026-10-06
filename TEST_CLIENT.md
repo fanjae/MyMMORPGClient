@@ -1,5 +1,11 @@
 # Unity 2D 테스트 클라이언트
 
+다른 장소 PC의 연결 거부(10061), 서버 수신 주소와 외부 접속 설정은 [REMOTE_ACCESS.md](../MyMMORPGServer/docs/REMOTE_ACCESS.md)를 참고합니다. SERVER_BIND_IP는 서버용이며 클라이언트 Host에는 서버의 실제 IP를 입력합니다.
+
+2026-10-06 Login version 2·Game version 4와 UTF-8 이름 65바이트 형식을 적용했습니다. 서버와 Windows 클라이언트를 함께 갱신해야 합니다. 통신 장애/대기열 테스트와 반복 실행은 서버 저장소의 [NETWORK_RELIABILITY.md](../MyMMORPGServer/docs/NETWORK_RELIABILITY.md)를 참고합니다.
+
+좌표 지정 Send UI를 제거하고 전송 후 채팅 포커스 유지, 본인 렌더링 우선순위, `/m 캐릭터ID 메시지` 귓속말과 계정 채팅 제한을 추가했습니다. 상세 규칙·프로토콜은 [CHAT_WHISPER.md](../MyMMORPGServer/docs/CHAT_WHISPER.md)에 있습니다.
+
 최신 구현에서는 100000000이 발판 맵으로 전환되어 **좌우 방향키 + Space 점프**를 사용합니다. 100000001은 기존 자유 이동을 유지합니다. 최신 테스트 실행·PASS 기준·지형/입력 패킷은 [PLATFORM_NETWORK.md](../MyMMORPGServer/docs/PLATFORM_NETWORK.md)에 있습니다. 아래 기존 절차의 절대 좌표 테스트와 PASS 16 기본 실행은 문서에 설명한 임시 Free 설정에서 수행합니다. 최신 발판 테스트는 `dotnet run --project .\Tests\MapLocalIntegration\MapLocalIntegration.csproj -- --platform`입니다.
 
 2026-10-05 자동 및 Unity 두 클라이언트 검증 결과와 반복 확인 절차는 [TEST_RESULTS_2026-10-05.md](TEST_RESULTS_2026-10-05.md)에 있습니다. 지속 방향키 입력과 채팅 포커스는 사용자 확인을 받아 기록했습니다.
@@ -95,11 +101,11 @@
 
 ## 2. 클라이언트 두 개 실행
 
-1. Unity Hub에서 이 프로젝트를 Unity `6000.3.7f1`로 열고, 필요한 경우 `File > Build Profiles`에서 `SampleScene`을 포함해 Windows 빌드를 만듭니다. 이 저장소에서 만든 최신 빌드는 `Builds/Windows/MyMMORPGClient.exe`에 있습니다. 빌드 폴더의 실행 파일, `MyMMORPGClient_Data`, `UnityPlayer.dll` 등을 함께 둡니다.
+1. Unity Hub에서 이 프로젝트를 Unity `6000.3.7f1`로 열고, 필요한 경우 `File > Build Profiles`에서 `SampleScene`을 포함해 Windows 빌드를 만듭니다. 이 저장소에서 만든 최신 빌드는 `Builds/Chat/MyMMORPGClient.exe`에 있습니다. 빌드 폴더의 실행 파일, `MyMMORPGClient_Data`, `UnityPlayer.dll` 등을 함께 둡니다.
 2. 클라이언트 저장소 루트에서 Windows 빌드를 두 번 실행합니다.
 
    ```powershell
-   $clientExe = (Resolve-Path .\Builds\Windows\MyMMORPGClient.exe).Path
+   $clientExe = (Resolve-Path .\Builds\Chat\MyMMORPGClient.exe).Path
    Start-Process -FilePath $clientExe -WorkingDirectory (Split-Path $clientExe)
    Start-Process -FilePath $clientExe -WorkingDirectory (Split-Path $clientExe)
    ```
@@ -131,12 +137,12 @@
 2. 첫 번째 클라이언트에서 `↑`를 약 1초 누릅니다. 이번에는 Y가 약 80 증가하고 X는 유지되어야 합니다. `←`와 `↓`도 각각 X 감소, Y 감소인지 확인합니다. 대각선 입력은 이동 속도가 두 배가 되지 않아야 합니다.
 3. 두 번째 화면에서 `Last PlayerMove: 1001 (...)`와 `Remote 1001: (...)`가 갱신되고 청록색 원격 Player가 새 위치로 부드럽게 이동해야 합니다. 첫 번째 창에 포커스가 있는 동안에도 두 번째 창에서 처리가 진행되어야 합니다.
 4. 화살표 키를 놓고 `Local position`과 `Remote 1001` 좌표가 더 이상 변하지 않는지 확인합니다. 두 화면의 원격 Player 수는 계속 1이어야 합니다.
-5. 좌표 지정 기능은 현재 Local position의 X보다 4 큰 값과 동일한 Y를 입력하고 `Send`를 누릅니다. `Move accepted`가 표시되고 두 창의 해당 Player 서버 좌표가 일치해야 합니다. 큰 절대 좌표 변경은 속도 제한을 적용하므로 순간이동처럼 사용할 수 없습니다.
+5. 좌표 지정 Send UI는 제거했습니다. 경계·속도·큰 절대 좌표 요청 검증은 아래 자동 회귀 테스트에서 확인합니다.
 6. 두 번째 클라이언트에서 화살표 키로 `2001`을 이동시킵니다. 첫 번째 화면에서는 노란색 `2001`이 움직이고 청록색 `1001`의 좌표는 유지되어야 합니다.
 
 화살표 이동은 서버 `MapInfo`의 속도 설정으로 목표 좌표를 계산하며, 최대 0.05초 간격으로 이전 응답을 받은 뒤 다음 `MoveRequest`를 보냅니다. 기본 속도는 초당 서버 좌표 80단위입니다. 로컬 사각형은 요청 위치로 예측·보간하지만 `Local position`은 서버 응답으로만 갱신합니다. 다른 Player는 허용된 이동의 `PlayerMove`를 받을 때마다 보간합니다. 카메라가 로컬 Player를 따라갈 때 정지한 객체도 화면에서는 반대 방향으로 움직여 보일 수 있으므로 실제 이동은 ID별 서버 좌표로 판단합니다.
 
-서버는 요청자에게 `MoveResponse`로 결과와 확정 좌표를 전달합니다. `OutOfBounds`나 `SpeedExceeded`가 반환되면 입력 목표와 화면 위치를 서버 좌표로 보정하고 상대에게 이동을 전파하지 않습니다. `Move X/Y`는 서버 검증을 받는 일반 이동 요청입니다. 발판·지형 충돌, 점프와 중력은 아직 구현되지 않았습니다.
+Free 서버는 요청자에게 `MoveResponse`로 결과와 확정 좌표를 전달합니다. `OutOfBounds`나 `SpeedExceeded`가 반환되면 입력 목표와 화면 위치를 서버 좌표로 보정하고 상대에게 이동을 전파하지 않습니다. 기본 Platformer 맵의 발판·충돌·점프·중력은 [PLATFORM_NETWORK.md](../MyMMORPGServer/docs/PLATFORM_NETWORK.md)의 절차로 확인합니다.
 
 방향키는 실제 창을 활성화한 상태에서 1초 정도 누르고 확인합니다. 자동화된 짧은 키 입력 한 번은 프레임 사이에 끝날 수 있어 이 항목을 검증하지 못합니다.
 
@@ -156,13 +162,20 @@
 
 ### 같은 Map 채팅
 
-1. 두 클라이언트가 Map `100000000`에 있을 때 첫 번째 클라이언트의 `Map Chat` 입력란을 클릭해 `안녕하세요`를 입력하고 Enter를 누릅니다. `Send` 버튼을 눌러도 같은 패킷을 보냅니다.
+1. 두 클라이언트가 Map `100000000`에 있을 때 첫 번째 클라이언트의 `Chat` 입력란을 클릭해 `안녕하세요`를 입력하고 Enter를 누릅니다. `Send` 버튼을 눌러도 같은 패킷을 보냅니다.
 2. 두 창에 `Warrior: 안녕하세요`가 각각 한 번씩 나타나야 합니다. 서버가 발신자에게도 `PlayerChat`을 보내므로 클라이언트가 전송 즉시 기록을 추가하지 않습니다.
-3. 첫 번째 클라이언트를 Map `100000001`로 이동합니다. 첫 번째 화면의 채팅 기록은 새 맵 입장 시 비워집니다.
+3. 첫 번째 클라이언트를 Map `100000001`로 이동합니다. 첫 번째 화면의 일반 채팅 기록은 새 맵 입장 시 비우고 귓속말 기록은 유지합니다.
 4. 두 번째 클라이언트에서 `still in first map`을 Enter로 보냅니다. 두 번째 화면에는 `Archer: still in first map`이 나타나고, 첫 번째 화면에는 나타나지 않아야 합니다.
 5. 첫 번째 클라이언트를 Map `100000000`으로 돌려보낸 뒤 다시 채팅합니다. 양쪽 화면에 새 메시지가 나타나야 합니다.
 
-채팅 입력란에 포커스가 있는 동안에는 방향키 이동이 멈춥니다. Enter로 전송한 후에는 입력란 포커스가 해제되어 다시 이동할 수 있습니다. 메시지는 최대 127 UTF-8 바이트이며 빈 문자열과 공백만 있는 문자열은 전송하지 않습니다.
+채팅 입력란에 포커스가 있는 동안에는 방향키 이동이 멈춥니다. Enter·키패드 Enter·Send 전송 후에도 포커스를 유지해 클릭 없이 다음 메시지를 입력할 수 있습니다. Esc 또는 빈 게임 영역 클릭으로 포커스를 해제합니다. 메시지는 최대 127 UTF-8 바이트이며 빈 문자열과 공백만 있는 문자열은 전송하지 않습니다.
+
+### 귓속말·제한·겹침 렌더링
+
+1. 서로 다른 맵에서 A가 `/m 2001 안녕하세요`를 보내면 양쪽에 발신자·대상 이름과 ID가 포함된 귓속말을 한 번씩 표시합니다. 일반 채팅과 달리 다른 맵에서도 전달됩니다.
+2. B는 `/m 1001 답장`을 보냅니다. 없는 ID나 종료한 대상에게 보내면 미접속 알림을 표시하며 연결은 유지합니다. `/m 1001`처럼 본문이 없으면 입력 형식 오류를 표시합니다.
+3. 일반 채팅과 귓속말을 연속 5회 보낸 뒤 다음 요청은 제한 알림과 재시도 시간을 표시합니다. 초당 1회씩 회복하고 맵 이동·재접속으로 제한을 초기화하지 않습니다.
+4. 같은 위치에서는 본인 사각형과 ID가 다른 Player보다 앞에 표시됩니다. 본인·원격 색상과 이동 좌표는 유지됩니다.
 
 입력 충돌은 다음 순서로 직접 확인합니다. 첫 번째 창의 Local position과 두 번째 창의 Remote 1001 좌표를 적고, 첫 번째 창의 채팅 입력란에서 `focus test`를 입력한 채 `→`를 1초 누릅니다. 두 좌표가 모두 유지되어야 합니다. Enter로 채팅을 전송한 뒤 다른 곳을 클릭하지 않고 `→`를 1초 누릅니다. 이번에는 양쪽에서 1001의 X가 증가하고 2001의 좌표는 유지되어야 합니다.
 
@@ -204,7 +217,7 @@ git check-ignore Tests/MapLocalIntegration/bin/Debug/net9.0/MapLocalIntegration.
 - 캐릭터 선택 뒤 GameServer 연결 실패: GameServer 콘솔과 포트 `7777`을 확인합니다. LoginServer가 GameServer에 auth ticket을 등록하므로 `7778`도 열려 있어야 합니다.
 - 두 번째 클라이언트에서 다른 Player가 안 보임: 두 클라이언트의 상태에 Map ID `100000000`이 표시되는지 확인합니다. 서버는 현재 두 포트를 localhost에 바인딩하므로 두 클라이언트는 같은 컴퓨터에서 실행해야 합니다.
 - 화살표 키가 동작하지 않음: 해당 클라이언트 창을 활성화하고 게임 화면의 빈 공간을 클릭해 입력 칸의 포커스를 해제합니다. `Project Settings > Player > Active Input Handling`은 `Input System Package (New)`로 설정되어 있어야 합니다.
-- Enter 채팅이 전송되지 않음: 게임 입장 후 화면 하단의 `Map Chat` 입력란을 클릭해 포커스를 둡니다. 상대에게 보이지 않으면 두 창의 Map ID가 같은지 확인합니다.
+- Enter 채팅이 전송되지 않음: 게임 입장 후 화면 하단의 `Chat` 입력란을 클릭해 포커스를 둡니다. 상대에게 보이지 않으면 두 창의 Map ID가 같은지 확인합니다.
 - Unity 코드 컴파일 오류: Console의 첫 번째 오류를 확인하고, 프로젝트가 Unity `6000.3.7f1`로 열렸는지 확인합니다.
 - Unity 명령행 빌드가 라이선스 오류 `198`과 `com.unity.editor.headless`를 표시함: `-nographics` 옵션을 빼고 `-batchmode`로 다시 실행합니다. 이 프로젝트에서는 해당 옵션을 제외한 Windows 배치 빌드가 완료됐습니다.
 
@@ -221,7 +234,7 @@ git check-ignore Tests/MapLocalIntegration/bin/Debug/net9.0/MapLocalIntegration.
 | `WorldManager`, `PlayerView`, `MonsterView` | Map-local 객체 수명 및 위치 표현 | 테스트 사각형 생성과 카메라 코드를 실제 표현 계층으로 분리한 뒤 재사용 |
 | `LocalMovementState` | 서버 확정 좌표, 대기 중 요청과 이전 응답 구분 | 실제 입력 계층에서도 재사용 |
 | `LoginScreenController` | IMGUI 테스트 로그인과 캐릭터 선택 | 실제 로그인 UI와 접속 흐름 계층을 별도로 구성 |
-| `TestClientController` | 방향키 테스트 입력, 절대 좌표 이동, Map 변경, 채팅 및 진단 표시 | 실제 입력/UI 계층으로 교체 |
+| `TestClientController` | 방향키 테스트 입력, Map 변경, 채팅·귓속말 및 진단 표시 | 실제 입력/UI 계층으로 교체 |
 | `Tests/MapLocalIntegration` | Unity 없이 실제 서버의 패킷 흐름 검증 | 새로운 Map-local 패킷 시나리오를 추가 |
 
 현재 `TestClientController.CreateTestClient()`는 `RuntimeInitializeOnLoadMethod`를 통해 씬 로딩 후 테스트 객체를 자동 생성합니다. 실제 게임 UI를 추가하기 전에 이 진입점을 테스트 씬 또는 명시적인 테스트 실행 설정으로 제한해야 합니다. 실제 UI와 테스트 UI를 동시에 자동 생성하지 않도록 먼저 진입점을 정리합니다.

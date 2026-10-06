@@ -8,6 +8,13 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="PlatformIntegration.cs" />
+    <Compile Include="NetworkReliability.cs" />
+    <Compile Include="ChatTests.cs" />
+    <Compile Include="ChatIntegration.cs" />
+    <Compile Include="../../Assets/Scripts/Game/ChatCommand.cs" Link="Game/ChatCommand.cs" />
+    <Compile Include="ServerLoadIntegration.cs" />
+    <Compile Include="../../Assets/Scripts/Network/MainThreadPacketQueue.cs" Link="Network/MainThreadPacketQueue.cs" />
+    <Compile Include="../../Assets/Scripts/Network/ConnectionError.cs" Link="Network/ConnectionError.cs" />
     <Compile Include="../../Assets/Scripts/Game/PlatformSimulation.cs" Link="Game/PlatformSimulation.cs" />
     <Compile Include="../../Assets/Scripts/Protocol/PlatformProtocol.cs" Link="Protocol/PlatformProtocol.cs" />
     <Compile Include="../../Assets/Scripts/Game/LocalMovementState.cs" Link="Game/LocalMovementState.cs" />

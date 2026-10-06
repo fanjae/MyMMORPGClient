@@ -208,11 +208,14 @@ internal sealed class PlatformPeer : IDisposable
     private MapInfoData _bounds;
     private ChangeMapData? _change;
     internal uint CharacterId;
+    internal string Name;
     internal MapGeometryData Geometry;
     internal readonly HashSet<uint> Players = new();
     internal readonly HashSet<uint> Monsters = new();
     internal readonly Dictionary<uint, MovementSnapshot> States = new();
     internal readonly List<PlayerChatData> Chat = new();
+    internal readonly List<WhisperData> Whispers = new();
+    internal readonly List<ChatResponseData> ChatResponses = new();
     internal MoveResponseData? LastMove;
     internal int Rejections;
     internal bool SawExpiry;
@@ -247,6 +250,7 @@ internal sealed class PlatformPeer : IDisposable
         EnterGameData enter = GameProtocol.ReadEnterGameResponse(packet.Payload);
         Program.Check(enter.Result == EnterGameResult.Success && enter.CharacterId == characterId, "Entry");
         CharacterId = characterId;
+        Name = enter.Name;
         await WaitAsync(() => Geometry != null && States.ContainsKey(characterId));
     }
 
@@ -356,6 +360,12 @@ internal sealed class PlatformPeer : IDisposable
                 break;
             case GamePacketOpcode.PlayerChat:
                 Chat.Add(GameProtocol.ReadPlayerChat(packet.Payload));
+                break;
+            case GamePacketOpcode.WhisperMessage:
+                Whispers.Add(GameProtocol.ReadWhisper(packet.Payload));
+                break;
+            case GamePacketOpcode.ChatResponse:
+                ChatResponses.Add(GameProtocol.ReadChatResponse(packet.Payload));
                 break;
             default:
                 throw new InvalidDataException($"Unexpected opcode {packet.Opcode}");

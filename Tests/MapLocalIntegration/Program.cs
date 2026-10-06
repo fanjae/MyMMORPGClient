@@ -7,6 +7,14 @@ internal static class Program
     private static async Task<int> Main(string[] args)
     {
         bool trace = args.Contains("--trace");
+        if (args.Contains("--network"))
+            return await NetworkReliability.RunAsync();
+        if (args.Contains("--chat-unit"))
+            return ChatTests.Run();
+        if (args.Contains("--chat"))
+            return await ChatIntegration.RunAsync();
+        if (args.Contains("--load"))
+            return await ServerLoadIntegration.RunAsync(args.FirstOrDefault(arg => arg.StartsWith("--db-delay-container="))?.Substring("--db-delay-container=".Length));
         if (args.Contains("--platform"))
             return await PlatformIntegration.RunAsync(args.FirstOrDefault(arg => arg.StartsWith("--physics-trace="))?.Substring("--physics-trace=".Length));
 
