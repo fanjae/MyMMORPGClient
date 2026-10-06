@@ -76,7 +76,7 @@ public sealed class WorldManager : MonoBehaviour
         if (_localPlayer != null)
             Destroy(_localPlayer.gameObject);
 
-        _localPlayer = CreatePlayer(data.CharacterId);
+        _localPlayer = CreatePlayer(data.CharacterId, true);
         _localPlayer.Initialize(data.CharacterId, data.X, data.Y);
     }
 
@@ -86,7 +86,7 @@ public sealed class WorldManager : MonoBehaviour
             return;
 
         // 같은 맵에 진입한 다른 플레이어 생성
-        PlayerView player = CreatePlayer(data.CharacterId);
+        PlayerView player = CreatePlayer(data.CharacterId, false);
         player.Initialize(data.CharacterId, data.X, data.Y);
 
         _players.Add(data.CharacterId, player);
@@ -172,15 +172,21 @@ public sealed class WorldManager : MonoBehaviour
             _localPlayer.PredictPosition(x, y);
     }
 
-    private PlayerView CreatePlayer(uint characterId)
+    private PlayerView CreatePlayer(uint characterId, bool local)
     {
         if (playerPrefab != null)
-            return Instantiate(playerPrefab);
+        {
+            PlayerView player = Instantiate(playerPrefab);
+            player.SetLocalRendering(local);
+            return player;
+        }
 
         GameObject gameObject = CreateTestObject($"Player {characterId}", GetPlayerColor(characterId));
         if (_geometry != null)
             gameObject.transform.localScale = new Vector3(_geometry.HalfWidth * 0.1f, _geometry.HalfHeight * 0.1f, 1f);
-        return gameObject.AddComponent<PlayerView>();
+        PlayerView view = gameObject.AddComponent<PlayerView>();
+        view.SetLocalRendering(local);
+        return view;
     }
 
     private static Color GetPlayerColor(uint characterId)

@@ -1,8 +1,21 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 
 public sealed class PlayerView : MonoBehaviour
 {
     public uint CharacterId { get; private set; }
+    public const int RemoteSortingOrder = 10;
+    public const int LocalSortingOrder = 20;
+
+    public void SetLocalRendering(bool local)
+    {
+        // 프리팹의 자식 Sprite도 한 그룹으로 정렬해 겹친 로컬 Player가 앞에 보이게 한다.
+        SortingGroup group = GetComponent<SortingGroup>();
+        if (group == null)
+            group = gameObject.AddComponent<SortingGroup>();
+        group.sortingLayerID = SortingLayer.NameToID("Default");
+        group.sortingOrder = local ? LocalSortingOrder : RemoteSortingOrder;
+    }
     public int ServerX { get; private set; }
     public int ServerY { get; private set; }
     public double ExactServerX { get; private set; }
