@@ -2,9 +2,9 @@
 
 다른 장소 PC의 연결 거부(10061), 서버 수신 주소와 외부 접속 설정은 [REMOTE_ACCESS.md](../MyMMORPGServer/docs/REMOTE_ACCESS.md)를 참고합니다. SERVER_BIND_IP는 서버용이며 클라이언트 Host에는 서버의 실제 IP를 입력합니다.
 
-2026-10-06 Login version 2·Game version 4와 UTF-8 이름 65바이트 형식을 적용했습니다. 서버와 Windows 클라이언트를 함께 갱신해야 합니다. 통신 장애/대기열 테스트와 반복 실행은 서버 저장소의 [NETWORK_RELIABILITY.md](../MyMMORPGServer/docs/NETWORK_RELIABILITY.md)를 참고합니다.
+2026-10-07 Game version 5와 입력 적용 단계 확인·미확인 입력 재실행 및 원격 버퍼 보간을 적용했습니다. Login version 2·UTF-8 이름 65바이트 형식은 유지합니다. 서버와 Windows 클라이언트를 함께 갱신해야 합니다. 반복 실행과 수동 지연 프록시는 [MOVEMENT_RECONCILIATION.md](../MyMMORPGServer/docs/MOVEMENT_RECONCILIATION.md)를 참고합니다.
 
-좌표 지정 Send UI를 제거하고 전송 후 채팅 포커스 유지, 본인 렌더링 우선순위, `/m 캐릭터ID 메시지` 귓속말과 계정 채팅 제한을 추가했습니다. 상세 규칙·프로토콜은 [CHAT_WHISPER.md](../MyMMORPGServer/docs/CHAT_WHISPER.md)에 있습니다.
+좌표 지정 Send UI를 제거하고 전송 후 채팅 포커스 유지, 본인 렌더링 우선순위, `/m 캐릭터ID 메시지` 귓속말과 계정 채팅 제한을 유지합니다. 일반 채팅·귓속말은 계정별 연속 5회·초당 1회 회복 제한을 공유합니다.
 
 최신 구현에서는 100000000이 발판 맵으로 전환되어 **좌우 방향키 + Space 점프**를 사용합니다. 100000001은 기존 자유 이동을 유지합니다. 최신 테스트 실행·PASS 기준·지형/입력 패킷은 [PLATFORM_NETWORK.md](../MyMMORPGServer/docs/PLATFORM_NETWORK.md)에 있습니다. 아래 기존 절차의 절대 좌표 테스트와 PASS 16 기본 실행은 문서에 설명한 임시 Free 설정에서 수행합니다. 최신 발판 테스트는 `dotnet run --project .\Tests\MapLocalIntegration\MapLocalIntegration.csproj -- --platform`입니다.
 
@@ -101,11 +101,11 @@
 
 ## 2. 클라이언트 두 개 실행
 
-1. Unity Hub에서 이 프로젝트를 Unity `6000.3.7f1`로 열고, 필요한 경우 `File > Build Profiles`에서 `SampleScene`을 포함해 Windows 빌드를 만듭니다. 이 저장소에서 만든 최신 빌드는 `Builds/Chat/MyMMORPGClient.exe`에 있습니다. 빌드 폴더의 실행 파일, `MyMMORPGClient_Data`, `UnityPlayer.dll` 등을 함께 둡니다.
+1. Unity Hub에서 이 프로젝트를 Unity `6000.3.7f1`로 열고, 필요한 경우 `File > Build Profiles`에서 `SampleScene`을 포함해 Windows 빌드를 만듭니다. 이 저장소에서 만든 최신 빌드는 `Builds/Movement/MyMMORPGClient.exe`에 있습니다. 빌드 폴더의 실행 파일, `MyMMORPGClient_Data`, `UnityPlayer.dll` 등을 함께 둡니다.
 2. 클라이언트 저장소 루트에서 Windows 빌드를 두 번 실행합니다.
 
    ```powershell
-   $clientExe = (Resolve-Path .\Builds\Chat\MyMMORPGClient.exe).Path
+   $clientExe = (Resolve-Path .\Builds\Movement\MyMMORPGClient.exe).Path
    Start-Process -FilePath $clientExe -WorkingDirectory (Split-Path $clientExe)
    Start-Process -FilePath $clientExe -WorkingDirectory (Split-Path $clientExe)
    ```
