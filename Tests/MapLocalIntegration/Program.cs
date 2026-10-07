@@ -7,6 +7,14 @@ internal static class Program
     private static async Task<int> Main(string[] args)
     {
         bool trace = args.Contains("--trace");
+        if (args.Contains("--proxy"))
+            return await ManualLatencyProxy.RunAsync(args);
+        if (args.Contains("--proxy-smoke"))
+            return await ManualProxySmoke.RunAsync();
+        if (args.Contains("--reconciliation"))
+            return ReconciliationTests.Run();
+        if (args.Contains("--latency"))
+            return await LatencyIntegration.RunAsync(args.FirstOrDefault(arg => arg.StartsWith("--latency-trace="))?.Substring("--latency-trace=".Length));
         if (args.Contains("--network"))
             return await NetworkReliability.RunAsync();
         if (args.Contains("--chat-unit"))

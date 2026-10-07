@@ -216,6 +216,7 @@ internal sealed class PlatformPeer : IDisposable
     internal readonly List<PlayerChatData> Chat = new();
     internal readonly List<WhisperData> Whispers = new();
     internal readonly List<ChatResponseData> ChatResponses = new();
+    internal event Action<MovementSnapshot> SnapshotReceived;
     internal MoveResponseData? LastMove;
     internal int Rejections;
     internal bool SawExpiry;
@@ -227,7 +228,7 @@ internal sealed class PlatformPeer : IDisposable
         _session.Disconnected += () => _packets.Writer.TryComplete(new IOException("Game disconnected"));
     }
 
-    internal async Task EnterAsync(string loginId, uint characterId, bool testVersion)
+    internal async Task EnterAsync(string loginId, uint characterId, bool testVersion, int? gamePort = null)
     {
         using PacketConnection login = new("platform/login", true, false);
         await login.ConnectAsync(7776);
@@ -236,7 +237,7 @@ internal sealed class PlatformPeer : IDisposable
         await login.SendAsync((ushort)LoginPacketOpcode.CharacterSelectRequest, LoginProtocol.CreateCharacterSelectRequest(characterId));
         CharacterSelectData ticket = LoginProtocol.ReadCharacterSelectResponse(await login.ReceiveAsync((ushort)LoginPacketOpcode.CharacterSelectResponse));
         Program.Check(ticket.Result == CharacterSelectResult.Success, "Character selection");
-        await _session.ConnectAsync("127.0.0.1", ticket.GameServerPort);
+        await _session.ConnectAsync("127.0.0.1", gamePort ?? ticket.GameServerPort);
         if (testVersion)
         {
             await SendAsync(GamePacketOpcode.EnterGameRequest, BitConverter.GetBytes(ticket.AuthKey));
@@ -327,6 +328,7 @@ internal sealed class PlatformPeer : IDisposable
                     Program.Check(state.ServerTick >= previous.ServerTick, "Tick regressed");
 
                 States[state.CharacterId] = state;
+                SnapshotReceived?.Invoke(state);
                 if (state.CharacterId == CharacterId && state.Reason == MovementStateReason.InputRejected)
                     ++Rejections;
                 if (state.CharacterId == CharacterId && state.Reason == MovementStateReason.InputExpired)

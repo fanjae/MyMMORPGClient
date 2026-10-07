@@ -11,6 +11,14 @@
     <Compile Include="NetworkReliability.cs" />
     <Compile Include="ChatTests.cs" />
     <Compile Include="ChatIntegration.cs" />
+    <Compile Include="ReconciliationTests.cs" />
+    <Compile Include="DelayedGameProxy.cs" />
+    <Compile Include="LatencyIntegration.cs" />
+    <Compile Include="ManualLatencyProxy.cs" />
+    <Compile Include="ManualProxySmoke.cs" />
+    <Compile Include="../../Assets/Scripts/TestClient/TestConnectionOptions.cs" Link="TestClient/TestConnectionOptions.cs" />
+    <Compile Include="../../Assets/Scripts/Game/MovementReconciliation.cs" Link="Game/MovementReconciliation.cs" />
+    <Compile Include="../../Assets/Scripts/Game/RemoteMovementBuffer.cs" Link="Game/RemoteMovementBuffer.cs" />
     <Compile Include="../../Assets/Scripts/Game/ChatCommand.cs" Link="Game/ChatCommand.cs" />
     <Compile Include="ServerLoadIntegration.cs" />
     <Compile Include="../../Assets/Scripts/Network/MainThreadPacketQueue.cs" Link="Network/MainThreadPacketQueue.cs" />

@@ -198,6 +198,7 @@ public sealed class LoginScreenController : MonoBehaviour
     private async void OnCharacterSelected(CharacterSelectData data)
     {
         int attempt = _attempt;
+        ushort gamePort = data.GameServerPort;
         if (data.Result != CharacterSelectResult.Success)
         {
             _connecting = false;
@@ -207,17 +208,18 @@ public sealed class LoginScreenController : MonoBehaviour
 
         try
         {
+            gamePort = TestConnectionOptions.GamePort(gamePort);
             _responseDeadline = Time.unscaledTime + 10f;
-            _status = $"Connecting to GameServer port {data.GameServerPort}.";
+            _status = $"Connecting to GameServer port {gamePort}.";
             // 로그인 뒤 Host 입력이 바뀌어도 인증받은 서버 주소로 게임 연결을 진행한다.
-            await _networkManager.ConnectGameServerAsync(_connectedHost, data.GameServerPort, data.AuthKey);
+            await _networkManager.ConnectGameServerAsync(_connectedHost, gamePort, data.AuthKey);
         }
         catch (Exception exception)
         {
             if (attempt != _attempt)
                 return;
             _connecting = false;
-            _status = ConnectionError.Describe(exception, _connectedHost, data.GameServerPort, "GameServer");
+            _status = ConnectionError.Describe(exception, _connectedHost, gamePort, "GameServer");
         }
     }
 

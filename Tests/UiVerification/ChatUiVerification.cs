@@ -11,6 +11,8 @@ using UnityEditor;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.LowLevel;
 
 // 검증 시 Assets/Editor로 복사해 실행하고 빌드 후 임시 복사본을 제거한다.
 public sealed class ChatUiVerification : EditorWindow
@@ -27,6 +29,9 @@ public sealed class ChatUiVerification : EditorWindow
     private double _deadline;
     private bool _finished;
     private Event _pendingKey;
+    private PlatformMovementController _movement;
+    private Keyboard _testKeyboard;
+    private readonly ConcurrentQueue<MovementInputData> _movementInputs = new();
 
     public static void Run()
     {
@@ -51,6 +56,7 @@ public sealed class ChatUiVerification : EditorWindow
         NetworkManager network = _host.AddComponent<NetworkManager>();
         _world = _host.AddComponent<WorldManager>();
         PlatformMovementController movement = _host.AddComponent<PlatformMovementController>();
+        _movement = movement;
         _controller = _host.AddComponent<TestClientController>();
         Set(_world, "networkManager", network);
         Set(movement, "_network", network); Set(movement, "_world", _world);
@@ -60,6 +66,7 @@ public sealed class ChatUiVerification : EditorWindow
         Invoke(_world, "OnPlayerEntered", new PlayerEnterData { CharacterId = 2001, Name = "remote" });
         Invoke(_controller, "OnEnterGameReceived", entry);
         VerifyRendering();
+        VerifyReplayedPresentation();
 
         _listener = new TcpListener(IPAddress.Loopback, 0);
         _listener.Start();
@@ -77,6 +84,16 @@ public sealed class ChatUiVerification : EditorWindow
                     ushort length = reader.ReadUInt16();
                     ushort opcode = reader.ReadUInt16();
                     byte[] body = reader.ReadBytes(length - 4);
+                    if (opcode == (ushort)GamePacketOpcode.MovementInput && body.Length == 22)
+                    {
+                        PacketReader movementReader = new(body, 22);
+                        _movementInputs.Enqueue(new MovementInputData
+                        {
+                            MapId = movementReader.ReadUInt32(), Generation = movementReader.ReadUInt64(), Sequence = movementReader.ReadUInt64(),
+                            Horizontal = unchecked((sbyte)movementReader.ReadByte()), JumpHeld = movementReader.ReadByte() != 0
+                        });
+                        continue;
+                    }
                     if (opcode != (ushort)GamePacketOpcode.ChatRequest || body.Length != 128)
                         throw new InvalidDataException("Unexpected UI chat packet");
                     _received.Enqueue(body);
@@ -88,6 +105,39 @@ public sealed class ChatUiVerification : EditorWindow
         Set(network, "_gameSession", _session);
         Set(_controller, "_chatInput", "first");
         Set(_controller, "_refocusChat", true);
+        _testKeyboard = InputSystem.AddDevice<Keyboard>();
+        InputSystem.QueueStateEvent(_testKeyboard, new KeyboardState(Key.RightArrow, Key.Space));
+        InputSystem.Update();
+    }
+
+    private void VerifyReplayedPresentation()
+    {
+        MapGeometryData geometry = new()
+        {
+            MapId = 100000000, Generation = 1, Mode = MovementMode.Platformer, HalfWidth = 6, HalfHeight = 6,
+            HorizontalSpeed = 80, JumpSpeed = 160, Gravity = 400, MaxFallSpeed = 300, SpawnFootholdId = 1,
+            Bounds = new MapInfoData { MapId = 100000000, MinX = -400, MaxX = 400, MinY = -200, MaxY = 200 }
+        };
+        geometry.Footholds.Add(1, new FootholdData { Id = 1, X1 = -400, X2 = 400, Y1 = -6, Y2 = -6 });
+        Invoke(_movement, "OnGeometry", geometry);
+        MovementSnapshot snapshot = new() { MapId = geometry.MapId, Generation = 1, CharacterId = 1001, Grounded = true, FootholdId = 1 };
+        Invoke(_movement, "OnState", snapshot);
+        MovementReconciliation prediction = (MovementReconciliation)Get(_movement, "_prediction");
+        prediction.SetInput(1, false); prediction.CreateInput();
+        for (int i = 0; i < 200; ++i) prediction.Advance(0.02);
+        _world.LocalPlayer.transform.position = WorldManager.ToUnityPosition(prediction.State.X, prediction.State.Y);
+        Vector3 before = _world.LocalPlayer.transform.position;
+        snapshot.ServerTick = 140; snapshot.Sequence = 1; snapshot.InputTicks = 140; snapshot.X = 224; snapshot.VelocityX = 80;
+        _world.LocalPlayer.ApplySnapshot(snapshot, true);
+        Check(_world.LocalPlayer.transform.position == before, "Delayed raw snapshot snapped the local sprite");
+        Invoke(_movement, "OnState", snapshot);
+        Vector3 target = (Vector3)Get(_world.LocalPlayer, "_targetPosition");
+        Check(Vector3.Distance(before, target) < 0.001f && _movement.ReplayedSteps == 60, "Local target did not use replayed position");
+        Pass("local presentation uses replayed position without snapping to delayed raw state");
+        Invoke(_movement, "OnGeometry", geometry);
+        snapshot.ServerTick = 0; snapshot.Sequence = 0; snapshot.InputTicks = 0; snapshot.X = 0; snapshot.VelocityX = 0;
+        Invoke(_movement, "OnState", snapshot);
+        _world.LocalPlayer.ResetSnapshots(); _world.LocalPlayer.SetPosition(0, 0);
     }
 
     private void VerifyRendering()
@@ -175,6 +225,13 @@ public sealed class ChatUiVerification : EditorWindow
             if (type == EventType.Repaint && _phase == 0)
             {
                 Check(GUI.GetNameOfFocusedControl() == "MapChatInput", "Initial chat focus missing");
+                Check(_testKeyboard.rightArrowKey.isPressed && _testKeyboard.spaceKey.isPressed, "Test movement keys are not held");
+                Invoke(_movement, "Update");
+                MovementReconciliation prediction = (MovementReconciliation)Get(_movement, "_prediction");
+                Check(prediction.Horizontal == 0 && !prediction.WireJump, "Actual chat focus did not neutralize held movement keys");
+                // 가상 키는 차단 검증 직후 제거해 Editor의 후속 GUI 입력에 섞이지 않게 한다.
+                InputSystem.RemoveDevice(_testKeyboard);
+                _testKeyboard = null;
                 _phase = 1; SendKey(KeyCode.Return);
             }
             else if (type == EventType.KeyDown && key == KeyCode.Return && _phase == 1)
@@ -217,12 +274,14 @@ public sealed class ChatUiVerification : EditorWindow
         if (_finished) return;
         if (EditorApplication.timeSinceStartup > _deadline) { Fail(new TimeoutException($"UI phase {_phase}")); return; }
         Repaint();
-        if (_phase != 7 || _received.Count != 2) return;
+        if (_phase != 7 || _received.Count != 2 || _movementInputs.IsEmpty) return;
         try
         {
             byte[][] messages = _received.ToArray();
             Check(new PacketReader(messages[0], 128).ReadFixedString(128) == "first" && new PacketReader(messages[1], 128).ReadFixedString(128) == "n", "UI did not send the two real TCP messages in order");
             Pass("two chat messages arrive over TCP in order");
+            Check(_movementInputs.All(input => input.Horizontal == 0 && !input.JumpHeld), "Chat focus sent a movement or jump packet");
+            Pass("actual IMGUI chat focus sends neutral TCP input while Right and Space are held");
             Invoke(_controller, "OnPlayerChatReceived", new PlayerChatData { CharacterId = 1001, Message = "map" });
             Invoke(_controller, "OnWhisperReceived", new WhisperData { SenderCharacterId = 1001, TargetCharacterId = 2001, TargetName = "remote", Message = "whisper" });
             Invoke(_controller, "OnMapChanged", new ChangeMapData { Result = ChangeMapResult.Success, MapId = 100000001 });
@@ -239,16 +298,17 @@ public sealed class ChatUiVerification : EditorWindow
         catch (Exception exception) { Fail(exception); }
     }
 
-    private void SendKey(KeyCode code, char character = '\0') => EditorApplication.delayCall += () =>
+    private void SendKey(KeyCode code, char character = '\0')
     {
         // Editor 단축키 계층을 거치지 않고 활성 OnGUI 컨텍스트에 입력 이벤트를 전달한다.
         _pendingKey = new Event { type = EventType.KeyDown, keyCode = code, character = character };
         Repaint();
-    };
+    }
 
     private void Cleanup()
     {
         _session?.Dispose(); _peer?.Dispose(); _listener?.Stop();
+        if (_testKeyboard != null) InputSystem.RemoveDevice(_testKeyboard);
         if (_world != null)
         {
             foreach (PlayerView view in _world.RemotePlayers.ToArray()) DestroyImmediate(view.gameObject);
@@ -257,6 +317,8 @@ public sealed class ChatUiVerification : EditorWindow
         if (_host != null) DestroyImmediate(_host);
         Close();
     }
+
+    public static void BuildWindows() => Build();
 
     private static void Build()
     {
