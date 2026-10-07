@@ -192,6 +192,8 @@ public sealed class TestClientController : MonoBehaviour
 
         GUILayout.Label(_lastPlayerMove);
         GUILayout.Label(_platformMovement.IsPlatformer ? $"Left/Right + Space: jump ({_platformMovement.LastReason})" : "Arrow keys: move (click game view)");
+        if (_platformMovement.IsPlatformer)
+            GUILayout.Label($"Pending: {_platformMovement.PendingSteps}  Replay: {_platformMovement.ReplayedSteps}  Correction: {_platformMovement.LastCorrection:F2}");
 
         GUI.enabled = !_changingMap;
 

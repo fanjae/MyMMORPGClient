@@ -28,6 +28,8 @@ public struct MovementSnapshot
     public uint FootholdId;
     public bool Grounded;
     public MovementStateReason Reason;
+    public uint InputTicks;
+    public bool JumpHeld;
 }
 
 public struct FootholdData
@@ -87,7 +89,7 @@ public static class PlatformProtocol
 
     public static MovementSnapshot ReadState(byte[] payload)
     {
-        PacketReader reader = new(payload, 70);
+        PacketReader reader = new(payload, 75);
         MovementSnapshot state = new();
         state.MapId = reader.ReadUInt32();
         state.Generation = reader.ReadUInt64();
@@ -101,11 +103,14 @@ public static class PlatformProtocol
         state.FootholdId = reader.ReadUInt32();
         byte grounded = reader.ReadByte();
         byte reason = reader.ReadByte();
-        if (grounded > 1 || reason > 3)
+        state.InputTicks = reader.ReadUInt32();
+        byte jumpHeld = reader.ReadByte();
+        if (grounded > 1 || reason > 3 || jumpHeld > 1)
             throw new InvalidDataException("Invalid movement state flags");
 
         state.Grounded = grounded != 0;
         state.Reason = (MovementStateReason)reason;
+        state.JumpHeld = jumpHeld != 0;
         return state;
     }
 

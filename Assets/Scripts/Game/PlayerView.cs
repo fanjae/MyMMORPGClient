@@ -22,12 +22,18 @@ public sealed class PlayerView : MonoBehaviour
     public double ExactServerY { get; private set; }
     private ulong _lastTick;
     private bool _hasSnapshot;
+    private readonly RemoteMovementBuffer _remoteMovement = new();
 
     private Vector3 _targetPosition;
     private const float InterpolationSpeed = 12f;
 
     private void Update()
     {
+        if (_remoteMovement.Sample(Time.unscaledTimeAsDouble, out double x, out double y))
+        {
+            transform.position = WorldManager.ToUnityPosition(x, y);
+            return;
+        }
         // 수신 좌표 사이를 짧게 보간하고 목표에 가까워지면 정확한 위치로 맞춘다.
         float blend = 1f - Mathf.Exp(-InterpolationSpeed * Time.deltaTime);
         transform.position = Vector3.Lerp(transform.position, _targetPosition, blend);
@@ -77,6 +83,15 @@ public sealed class PlayerView : MonoBehaviour
     {
         _hasSnapshot = false;
         _lastTick = 0;
+        _remoteMovement.Reset();
+    }
+
+    public void CorrectPredictedPosition(double x, double y, bool snap)
+    {
+        PredictPosition(x, y);
+        // 로컬 표시는 지연된 원본 snapshot이 아닌 재실행 완료 위치로만 보정한다.
+        if (snap || (transform.position - _targetPosition).sqrMagnitude > 16f)
+            transform.position = _targetPosition;
     }
 
     public void ApplySnapshot(MovementSnapshot state, bool local)
@@ -90,10 +105,11 @@ public sealed class PlayerView : MonoBehaviour
         ExactServerY = state.Y;
         ServerX = (int)System.Math.Round(state.X, System.MidpointRounding.AwayFromZero);
         ServerY = (int)System.Math.Round(state.Y, System.MidpointRounding.AwayFromZero);
-        if (!local || state.Reason != MovementStateReason.Normal)
-            PredictPosition(state.X, state.Y);
-
-        if (state.Reason == MovementStateReason.Respawned || (transform.position - WorldManager.ToUnityPosition(state.X, state.Y)).sqrMagnitude > 4f)
-            transform.position = WorldManager.ToUnityPosition(state.X, state.Y);
+        if (!local)
+        {
+            _remoteMovement.Add(state, Time.unscaledTimeAsDouble);
+            _remoteMovement.Sample(Time.unscaledTimeAsDouble, out double x, out double y);
+            transform.position = WorldManager.ToUnityPosition(x, y);
+        }
     }
 }

@@ -7,23 +7,20 @@ public sealed class PlatformMovementController : MonoBehaviour
     private NetworkManager _network;
     private WorldManager _world;
     private MapGeometryData _geometry;
-    private PlatformSimulation _simulation;
-    private PlatformState _state;
-    private ulong _sequence;
-    private ulong _lastTick;
-    private bool _hasState;
-    private bool _sending;
+    private readonly MovementReconciliation _prediction = new();
+    private bool _sendFailed;
     private bool _sentJump;
     private int _sentHorizontal;
-    private bool _jumpPending;
-    private bool _previousJump;
-    private double _accumulator;
     private float _nextSendTime;
 
     public bool InputAllowed { get; set; } = true;
     public bool IsPlatformer => _geometry?.Mode == MovementMode.Platformer;
     public bool GeometryReady => _geometry != null;
     public MovementStateReason LastReason { get; private set; }
+    public int PendingSteps => _prediction.PendingSteps;
+    public int ReplayedSteps => _prediction.LastReplayedSteps;
+    public double LastCorrection => _prediction.LastCorrection;
+    public bool WaitingForFreshInput => _prediction.WaitingForFreshInput;
 
     private void Awake()
     {
@@ -52,90 +49,57 @@ public sealed class PlatformMovementController : MonoBehaviour
         Reset();
         _geometry = geometry;
         if (IsPlatformer)
-        {
-            _simulation = new PlatformSimulation(geometry);
-            _simulation.Reset(ref _state);
-        }
+            _prediction.Configure(geometry, _world.LocalCharacterId);
     }
 
     private void OnState(MovementSnapshot snapshot)
     {
-        if (!IsPlatformer || snapshot.CharacterId != _world.LocalCharacterId || snapshot.MapId != _geometry.MapId || snapshot.Generation != _geometry.Generation || (_hasState && snapshot.ServerTick < _lastTick))
+        if (_sendFailed || !IsPlatformer || !_prediction.Apply(snapshot))
             return;
-
-        _lastTick = snapshot.ServerTick;
-        _hasState = true;
         LastReason = snapshot.Reason;
-        // 서버 상태에서 예측을 다시 시작하고 화면의 작은 오차는 PlayerView에서 보간한다.
-        _state.X = snapshot.X;
-        _state.Y = snapshot.Y;
-        _state.VelocityX = snapshot.VelocityX;
-        _state.VelocityY = snapshot.VelocityY;
-        _state.FootholdId = snapshot.FootholdId;
-        _state.Grounded = snapshot.Grounded;
-        _state.JumpHeld = _previousJump;
-        _accumulator = 0;
-        _world.LocalPlayer?.PredictPosition(_state.X, _state.Y);
+        PlatformState state = _prediction.State;
+        _world.LocalPlayer?.CorrectPredictedPosition(state.X, state.Y, snapshot.Reason == MovementStateReason.Respawned);
     }
 
     private void Update()
     {
-        if (!IsPlatformer || !_hasState || _world.LocalPlayer == null)
+        if (_sendFailed || !IsPlatformer || !_prediction.Ready || _world.LocalPlayer == null)
             return;
-
         Keyboard keyboard = Keyboard.current;
         bool allowed = InputAllowed && Application.isFocused && GUIUtility.keyboardControl == 0 && keyboard != null;
-        int horizontal = allowed ? (keyboard.rightArrowKey.isPressed ? 1 : 0) - (keyboard.leftArrowKey.isPressed ? 1 : 0) : 0;
-        bool jump = allowed && keyboard.spaceKey.isPressed;
-        if (allowed && keyboard.spaceKey.wasPressedThisFrame && !_previousJump)
-            _jumpPending = true;
-
-        _previousJump = jump;
-        if (!allowed)
-            _jumpPending = false;
-
-        bool wireJump = jump || _jumpPending;
-        if (!_sending && (horizontal != _sentHorizontal || wireJump != _sentJump || Time.unscaledTime >= _nextSendTime))
+        if (allowed)
         {
-            SendInput(horizontal, wireJump);
-            _jumpPending = false;
+            int horizontal = (keyboard.rightArrowKey.isPressed ? 1 : 0) - (keyboard.leftArrowKey.isPressed ? 1 : 0);
+            _prediction.SetInput(horizontal, keyboard.spaceKey.isPressed, keyboard.spaceKey.wasPressedThisFrame);
         }
-
-        // 과도한 프레임 지연도 서버와 같은 고정 간격 및 최대 5 tick으로 처리한다.
-        _accumulator = Math.Min(_accumulator + Time.unscaledDeltaTime, 0.1);
-        while (_accumulator >= PlatformSimulation.FixedDeltaSeconds)
+        else
         {
-            _simulation.Step(ref _state, horizontal, wireJump);
-            _accumulator -= PlatformSimulation.FixedDeltaSeconds;
+            // 채팅 포커스와 창 비활성화의 중립 입력에 이전 짧은 점프를 섞지 않는다.
+            _prediction.StopInput();
         }
-
-        _world.LocalPlayer.PredictPosition(_state.X, _state.Y);
+        if (_prediction.Horizontal != _sentHorizontal || _prediction.WireJump != _sentJump || Time.unscaledTime >= _nextSendTime)
+            SendInput();
+        _prediction.Advance(Time.unscaledDeltaTime);
+        PlatformState state = _prediction.State;
+        _world.LocalPlayer.PredictPosition(state.X, state.Y);
     }
 
-    private async void SendInput(int horizontal, bool jump)
+    private async void SendInput()
     {
         MapGeometryData geometry = _geometry;
-        MovementInputData input = new() { MapId = geometry.MapId, Generation = geometry.Generation, Sequence = ++_sequence, Horizontal = (sbyte)horizontal, JumpHeld = jump };
-        _sentHorizontal = horizontal;
-        _sentJump = jump;
+        MovementInputData input = _prediction.CreateInput();
+        _sentHorizontal = input.Horizontal;
+        _sentJump = input.JumpHeld;
         _nextSendTime = Time.unscaledTime + 0.05f;
-        _sending = true;
-        try
-        {
-            await _network.SendMovementInputAsync(input);
-        }
+        // 송신 중 바뀐 입력도 번호를 부여하고 TcpSession의 직렬 송신 순서를 사용한다.
+        try { await _network.SendMovementInputAsync(input); }
         catch (Exception exception)
         {
             if (ReferenceEquals(_geometry, geometry))
             {
-                _hasState = false;
+                _sendFailed = true;
                 Debug.LogException(exception);
             }
-        }
-        finally
-        {
-            if (ReferenceEquals(_geometry, geometry))
-                _sending = false;
         }
     }
 
@@ -148,16 +112,11 @@ public sealed class PlatformMovementController : MonoBehaviour
     private void Reset()
     {
         _geometry = null;
-        _simulation = null;
-        _hasState = false;
-        _sending = false;
-        _sequence = 0;
-        _lastTick = 0;
+        _prediction.Reset();
+        _sendFailed = false;
         _sentHorizontal = 0;
         _sentJump = false;
-        _previousJump = false;
-        _jumpPending = false;
-        _accumulator = 0;
         _nextSendTime = 0;
+        LastReason = MovementStateReason.Normal;
     }
 }

@@ -126,7 +126,7 @@ public struct ChangeMapData
 public static class GameProtocol
 {
     public const int MaxPlayerNameLength = LoginProtocol.MaxCharacterNameLength;
-    public const uint ProtocolVersion = 4;
+    public const uint ProtocolVersion = 5;
     public const int MaxChatMessageLength = 128;
     private const int PlayerDataSize = 4 + MaxPlayerNameLength + 2 + 4 + 4;
 
