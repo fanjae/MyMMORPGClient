@@ -2,7 +2,7 @@
 
 다른 장소 PC의 연결 거부(10061), 서버 수신 주소와 외부 접속 설정은 [REMOTE_ACCESS.md](../MyMMORPGServer/docs/REMOTE_ACCESS.md)를 참고합니다. SERVER_BIND_IP는 서버용이며 클라이언트 Host에는 서버의 실제 IP를 입력합니다.
 
-2026-10-07 Game version 5와 입력 적용 단계 확인·미확인 입력 재실행 및 원격 버퍼 보간을 적용했습니다. Login version 2·UTF-8 이름 65바이트 형식은 유지합니다. 서버와 Windows 클라이언트를 함께 갱신해야 합니다. 반복 실행과 수동 지연 프록시는 [MOVEMENT_RECONCILIATION.md](../MyMMORPGServer/docs/MOVEMENT_RECONCILIATION.md)를 참고합니다.
+2026-10-08 Game version **6**으로 갱신했습니다. 발판 이동·점프·착지를 클라이언트가 계산하고 서버는 행동과 보고 상태를 중계합니다. 이동 관련 송신은 최대 초당 5회이며 변경이 없으면 약 1초마다 상태 확인을 보냅니다. 새 Windows 실행 파일은 `Builds/MovementRelay/MyMMORPGClient.exe`입니다. 서버와 클라이언트를 함께 갱신해야 합니다. 설계·자동 검증·LAN 확인은 [CLIENT_MOVEMENT_RELAY.md](../MyMMORPGServer/docs/CLIENT_MOVEMENT_RELAY.md)를 참고합니다. Login version 2·UTF-8 이름 65바이트 형식은 유지합니다. 기존 [MOVEMENT_RECONCILIATION.md](../MyMMORPGServer/docs/MOVEMENT_RECONCILIATION.md)는 version 5 재실행 방식의 기록입니다.
 
 좌표 지정 Send UI를 제거하고 전송 후 채팅 포커스 유지, 본인 렌더링 우선순위, `/m 캐릭터ID 메시지` 귓속말과 계정 채팅 제한을 유지합니다. 일반 채팅·귓속말은 계정별 연속 5회·초당 1회 회복 제한을 공유합니다.
 
