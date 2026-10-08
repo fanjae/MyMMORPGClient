@@ -31,5 +31,7 @@ public enum GamePacketOpcode : ushort
     GeometryEnd = 19,
     WhisperRequest = 20,
     ChatResponse = 21,
-    WhisperMessage = 22
+    WhisperMessage = 22,
+    MovementActions = 23,
+    MovementActionsBroadcast = 24
 }

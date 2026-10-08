@@ -37,6 +37,11 @@ public sealed class PacketWriter : IDisposable
         _writer.Write(value);
     }
 
+    public void Write(long value)
+    {
+        _writer.Write(value);
+    }
+
     public void WriteFixedString(string value, int byteLength)
     {
         // 고정 길이 필드는 남는 공간을 0으로 유지하기 위해 목적 버퍼를 먼저 생성

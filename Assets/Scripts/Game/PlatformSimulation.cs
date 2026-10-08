@@ -16,6 +16,7 @@ public sealed class PlatformSimulation
     public const double FixedDeltaSeconds = 0.02;
     private const double Epsilon = 0.000001;
     private readonly MapGeometryData _geometry;
+    public bool LastRespawned { get; private set; }
 
     private struct Collision
     {
@@ -39,6 +40,7 @@ public sealed class PlatformSimulation
 
     public void Step(ref PlatformState state, int horizontal, bool jumpHeld)
     {
+        LastRespawned = false;
         bool jumpPressed = jumpHeld && !state.JumpHeld;
         state.JumpHeld = jumpHeld;
         state.VelocityX = horizontal * (double)_geometry.HorizontalSpeed;
@@ -132,6 +134,7 @@ public sealed class PlatformSimulation
             {
                 bool jumpHeld = state.JumpHeld;
                 Reset(ref state);
+                LastRespawned = true;
                 state.JumpHeld = jumpHeld;
                 return;
             }

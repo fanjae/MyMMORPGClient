@@ -49,6 +49,7 @@ public sealed class WorldManager : MonoBehaviour
         networkManager.GameDisconnected += OnGameDisconnected;
         networkManager.GeometryReceived += OnGeometry;
         networkManager.MovementReceived += OnMovementState;
+        networkManager.MovementActionsReceived += OnMovementActions;
     }
 
     private void OnDisable()
@@ -63,6 +64,7 @@ public sealed class WorldManager : MonoBehaviour
         networkManager.GameDisconnected -= OnGameDisconnected;
         networkManager.GeometryReceived -= OnGeometry;
         networkManager.MovementReceived -= OnMovementState;
+        networkManager.MovementActionsReceived -= OnMovementActions;
     }
 
     private void OnEnterGame(EnterGameData data)
@@ -278,6 +280,20 @@ public sealed class WorldManager : MonoBehaviour
         if (state.CharacterId == LocalCharacterId)
             _localPlayer.ApplySnapshot(state, true);
         else if (_players.TryGetValue(state.CharacterId, out PlayerView player))
-            player.ApplySnapshot(state, false);
+            player.ConfigureMovementActions(_geometry, state);
+    }
+
+    private void OnMovementActions(MovementActionBroadcast batch)
+    {
+        if (_geometry == null || batch.MapId != _geometry.MapId || batch.Generation != _geometry.Generation)
+            return;
+        foreach (RelayedMovementAction relay in batch.Actions)
+        {
+            // 본인의 오래된 중계 좌표가 현재 클라이언트 물리를 덮지 않게 한다.
+            if (relay.CharacterId == LocalCharacterId)
+                _localPlayer?.RecordMovementAction(relay.Action);
+            else if (_players.TryGetValue(relay.CharacterId, out PlayerView player))
+                player.ApplyMovementAction(relay);
+        }
     }
 }

@@ -191,9 +191,9 @@ public sealed class TestClientController : MonoBehaviour
             GUILayout.Label($"Remote {player.CharacterId}: ({player.ServerX}, {player.ServerY})");
 
         GUILayout.Label(_lastPlayerMove);
-        GUILayout.Label(_platformMovement.IsPlatformer ? $"Left/Right + Space: jump ({_platformMovement.LastReason})" : "Arrow keys: move (click game view)");
+        GUILayout.Label(_platformMovement.IsPlatformer ? "Left/Right + Space: client jump / landing relay" : "Arrow keys: move (click game view)");
         if (_platformMovement.IsPlatformer)
-            GUILayout.Label($"Pending: {_platformMovement.PendingSteps}  Replay: {_platformMovement.ReplayedSteps}  Correction: {_platformMovement.LastCorrection:F2}");
+            GUILayout.Label($"Actions pending: {_platformMovement.PendingActions}  Sent: {_platformMovement.PacketsSent}  Jump ready: {_platformMovement.CanJump}");
 
         GUI.enabled = !_changingMap;
 

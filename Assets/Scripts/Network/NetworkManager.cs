@@ -26,6 +26,7 @@ public sealed class NetworkManager : MonoBehaviour
     public event Action<MapInfoData> MapInfoReceived;
     public event Action<MapGeometryData> GeometryReceived;
     public event Action<MovementSnapshot> MovementReceived;
+    public event Action<MovementActionBroadcast> MovementActionsReceived;
     public event Action<PlayerChatData> PlayerChatReceived;
     public event Action<WhisperData> WhisperReceived;
     public event Action<ChatResponseData> ChatRejected;
@@ -115,9 +116,9 @@ public sealed class NetworkManager : MonoBehaviour
         return _gameSession.SendAsync((ushort)GamePacketOpcode.ChangeMapRequest, payload);
     }
 
-    public Task SendMovementInputAsync(MovementInputData data)
+    public Task SendMovementActionsAsync(MovementActionBatch batch)
     {
-        return _gameSession.SendAsync((ushort)GamePacketOpcode.MovementInput, PlatformProtocol.CreateInput(data));
+        return _gameSession.SendAsync((ushort)GamePacketOpcode.MovementActions, MovementActionProtocol.CreateBatch(batch));
     }
 
     public Task SendChatAsync(string message)
@@ -216,6 +217,10 @@ public sealed class NetworkManager : MonoBehaviour
 
                 case GamePacketOpcode.MovementState:
                     MovementReceived?.Invoke(PlatformProtocol.ReadState(payload));
+                    break;
+
+                case GamePacketOpcode.MovementActionsBroadcast:
+                    MovementActionsReceived?.Invoke(MovementActionProtocol.ReadBroadcast(payload));
                     break;
 
                 case GamePacketOpcode.PlayerChat:

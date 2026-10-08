@@ -23,12 +23,22 @@ public sealed class PlayerView : MonoBehaviour
     private ulong _lastTick;
     private bool _hasSnapshot;
     private readonly RemoteMovementBuffer _remoteMovement = new();
+    private readonly RemoteMovementActions _remoteActions = new();
 
     private Vector3 _targetPosition;
     private const float InterpolationSpeed = 12f;
 
     private void Update()
     {
+        if (_remoteActions.Sample(Time.unscaledTimeAsDouble, out double actionX, out double actionY))
+        {
+            _targetPosition = WorldManager.ToUnityPosition(actionX, actionY);
+            if (_remoteActions.Teleported || (transform.position - _targetPosition).sqrMagnitude > 16f)
+                transform.position = _targetPosition;
+            else
+                transform.position = Vector3.Lerp(transform.position, _targetPosition, 1f - Mathf.Exp(-InterpolationSpeed * Time.unscaledDeltaTime));
+            return;
+        }
         if (_remoteMovement.Sample(Time.unscaledTimeAsDouble, out double x, out double y))
         {
             transform.position = WorldManager.ToUnityPosition(x, y);
@@ -84,6 +94,29 @@ public sealed class PlayerView : MonoBehaviour
         _hasSnapshot = false;
         _lastTick = 0;
         _remoteMovement.Reset();
+        _remoteActions.Reset();
+    }
+
+    public void ConfigureMovementActions(MapGeometryData geometry, MovementSnapshot snapshot)
+    {
+        ResetSnapshots();
+        ExactServerX = snapshot.X; ExactServerY = snapshot.Y;
+        _remoteActions.Configure(geometry, snapshot, Time.unscaledTimeAsDouble);
+    }
+
+    public void ApplyMovementAction(RelayedMovementAction relay)
+    {
+        if (!_remoteActions.Add(relay, Time.unscaledTimeAsDouble))
+            return;
+        RecordMovementAction(relay.Action);
+    }
+
+    public void RecordMovementAction(MovementActionData action)
+    {
+        // 본인의 중계 확인은 표시용 보고 좌표만 갱신하며 현재 물리에 적용하지 않는다.
+        ExactServerX = action.State.X; ExactServerY = action.State.Y;
+        ServerX = (int)System.Math.Round(ExactServerX, System.MidpointRounding.AwayFromZero);
+        ServerY = (int)System.Math.Round(ExactServerY, System.MidpointRounding.AwayFromZero);
     }
 
     public void CorrectPredictedPosition(double x, double y, bool snap)
