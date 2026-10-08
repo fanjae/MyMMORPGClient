@@ -70,6 +70,8 @@ internal static class ServerLoadIntegration
                     await pending.ExpectNoPacketsAsync();
                 }
                 await Task.WhenAll(peers.Select(peer => peer.PumpAsync(1000)));
+                await Task.WhenAll(peers.Select(peer => peer.InputAsync(0, false)));
+                await Task.WhenAll(peers.Select(peer => peer.PumpAsync(500)));
                 Program.Check(peers[0].Local.ServerTick - beforeDelay >= 40, "DB delay blocked existing players' ticks");
                 await delay.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
                 Program.Check(delay.ExitCode == 0, "DB lock test failed");

@@ -7,6 +7,13 @@ internal static class Program
     private static async Task<int> Main(string[] args)
     {
         bool trace = args.Contains("--trace");
+        if (args.Contains("--actions"))
+            return MovementActionTests.Run();
+        string relayPort = args.FirstOrDefault(arg => arg.StartsWith("--relay-fixture="));
+        if (relayPort != null)
+            return await MovementRelayIntegration.RunAsync(int.Parse(relayPort["--relay-fixture=".Length..]),
+                int.Parse(args.FirstOrDefault(arg => arg.StartsWith("--relay-delay="))?["--relay-delay=".Length..] ?? "0"),
+                int.Parse(args.FirstOrDefault(arg => arg.StartsWith("--relay-jitter="))?["--relay-jitter=".Length..] ?? "0"));
         if (args.Contains("--proxy"))
             return await ManualLatencyProxy.RunAsync(args);
         if (args.Contains("--proxy-smoke"))
@@ -14,7 +21,7 @@ internal static class Program
         if (args.Contains("--reconciliation"))
             return ReconciliationTests.Run();
         if (args.Contains("--latency"))
-            return await LatencyIntegration.RunAsync(args.FirstOrDefault(arg => arg.StartsWith("--latency-trace="))?.Substring("--latency-trace=".Length));
+            return await MovementActionGameIntegration.RunAsync(true, csv: args.FirstOrDefault(arg => arg.StartsWith("--latency-trace="))?.Substring("--latency-trace=".Length));
         if (args.Contains("--network"))
             return await NetworkReliability.RunAsync();
         if (args.Contains("--chat-unit"))
@@ -24,7 +31,7 @@ internal static class Program
         if (args.Contains("--load"))
             return await ServerLoadIntegration.RunAsync(args.FirstOrDefault(arg => arg.StartsWith("--db-delay-container="))?.Substring("--db-delay-container=".Length));
         if (args.Contains("--platform"))
-            return await PlatformIntegration.RunAsync(args.FirstOrDefault(arg => arg.StartsWith("--physics-trace="))?.Substring("--physics-trace=".Length));
+            return await MovementActionGameIntegration.RunAsync(false, args.FirstOrDefault(arg => arg.StartsWith("--physics-trace="))?.Substring("--physics-trace=".Length));
 
         try
         {

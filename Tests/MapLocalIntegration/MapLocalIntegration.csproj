@@ -12,6 +12,12 @@
     <Compile Include="ChatTests.cs" />
     <Compile Include="ChatIntegration.cs" />
     <Compile Include="ReconciliationTests.cs" />
+    <Compile Include="MovementActionTests.cs" />
+    <Compile Include="MovementRelayIntegration.cs" />
+    <Compile Include="MovementActionGameIntegration.cs" />
+    <Compile Include="../../Assets/Scripts/Game/ClientMovementActions.cs" Link="Game/ClientMovementActions.cs" />
+    <Compile Include="../../Assets/Scripts/Game/RemoteMovementActions.cs" Link="Game/RemoteMovementActions.cs" />
+    <Compile Include="../../Assets/Scripts/Protocol/MovementActionProtocol.cs" Link="Protocol/MovementActionProtocol.cs" />
     <Compile Include="DelayedGameProxy.cs" />
     <Compile Include="LatencyIntegration.cs" />
     <Compile Include="ManualLatencyProxy.cs" />

@@ -9,16 +9,18 @@ internal sealed class DelayedGameProxy : IAsyncDisposable
     private readonly CancellationTokenSource _stop = new();
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private readonly int _delay, _jitter;
+    private readonly int _targetPort;
     private readonly Task _relay;
     private TcpClient _front, _back;
     internal int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
     internal Task Completion => _relay;
 
-    internal DelayedGameProxy(int delay, int jitter, int listenPort = 0)
+    internal DelayedGameProxy(int delay, int jitter, int listenPort = 0, int targetPort = 7777)
     {
-        if (delay < 0 || jitter < 0 || jitter > delay || delay > 5000 || listenPort < 0 || listenPort > 65535)
+        if (delay < 0 || jitter < 0 || jitter > delay || delay > 5000 || listenPort < 0 || listenPort > 65535 || targetPort < 1 || targetPort > 65535)
             throw new ArgumentOutOfRangeException(nameof(delay));
         _delay = delay; _jitter = jitter;
+        _targetPort = targetPort;
         if (listenPort != 0) _listener = new TcpListener(IPAddress.Loopback, listenPort);
         _listener.Start();
         _relay = RunAsync();
@@ -30,7 +32,7 @@ internal sealed class DelayedGameProxy : IAsyncDisposable
         {
             _front = await _listener.AcceptTcpClientAsync(_stop.Token);
             _back = new TcpClient();
-            await _back.ConnectAsync("127.0.0.1", 7777, _stop.Token);
+            await _back.ConnectAsync("127.0.0.1", _targetPort, _stop.Token);
             _front.NoDelay = _back.NoDelay = true;
             await Task.WhenAll(RelayAsync(_front.GetStream(), _back.GetStream(), 0), RelayAsync(_back.GetStream(), _front.GetStream(), 2));
         }

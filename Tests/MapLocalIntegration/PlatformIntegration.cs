@@ -172,7 +172,7 @@ internal static class PlatformIntegration
         Console.WriteLine($"[PASS] {_stage}");
     }
 
-    private static void CheckPhysicsTrace(MapGeometryData geometry, string path)
+    internal static void CheckPhysicsTrace(MapGeometryData geometry, string path)
     {
         PlatformSimulation simulation = new(geometry);
         PlatformState state = default;
@@ -203,10 +203,13 @@ internal sealed class PlatformPeer : IDisposable
 {
     private readonly TcpSession _session = new();
     private readonly Channel<(GamePacketOpcode Opcode, byte[] Payload)> _packets = Channel.CreateUnbounded<(GamePacketOpcode, byte[])>();
-    private ulong _sequence;
     private MapGeometryData _pending;
     private MapInfoData _bounds;
     private ChangeMapData? _change;
+    private readonly ClientMovementActions _clientMovement = new();
+    private readonly Stopwatch _movementClock = Stopwatch.StartNew();
+    private double _lastAdvance;
+    private bool _lastJump;
     internal uint CharacterId;
     internal string Name;
     internal MapGeometryData Geometry;
@@ -217,6 +220,10 @@ internal sealed class PlatformPeer : IDisposable
     internal readonly List<WhisperData> Whispers = new();
     internal readonly List<ChatResponseData> ChatResponses = new();
     internal event Action<MovementSnapshot> SnapshotReceived;
+    internal event Action<RelayedMovementAction> ActionReceived;
+    internal readonly List<RelayedMovementAction> Actions = new();
+    internal int MovementPackets;
+    internal ClientMovementActions ClientMovement => _clientMovement;
     internal MoveResponseData? LastMove;
     internal int Rejections;
     internal bool SawExpiry;
@@ -260,10 +267,30 @@ internal sealed class PlatformPeer : IDisposable
         return _session.SendAsync((ushort)opcode, payload);
     }
 
-    internal Task InputAsync(sbyte horizontal, bool jump, ulong? sequence = null, ulong? generation = null)
+    internal async Task InputAsync(sbyte horizontal, bool jump, ulong? sequence = null, ulong? generation = null)
     {
-        MovementInputData input = new() { MapId = Geometry.MapId, Generation = generation ?? Geometry.Generation, Sequence = sequence ?? ++_sequence, Horizontal = horizontal, JumpHeld = jump };
-        return SendAsync(GamePacketOpcode.MovementInput, PlatformProtocol.CreateInput(input));
+        if (sequence.HasValue || generation.HasValue)
+            throw new InvalidOperationException("Use explicit action batches to test stale sequences or generations");
+        double now = _movementClock.Elapsed.TotalSeconds;
+        double elapsed = now - _lastAdvance;
+        // 새 입력을 오래된 경과 시간에 소급 적용하지 않는다.
+        double past = Math.Max(0, elapsed - PlatformSimulation.FixedDeltaSeconds);
+        while (past > 1e-8)
+        {
+            double step = Math.Min(0.1, past);
+            _clientMovement.Advance(step); past -= step;
+        }
+        _clientMovement.SetInput(horizontal, jump && !_lastJump);
+        _lastJump = jump;
+        _clientMovement.Advance(Math.Min(elapsed, PlatformSimulation.FixedDeltaSeconds));
+        _lastAdvance = now;
+        if (!_clientMovement.TryCreateBatch(now, out var batch))
+        {
+            if (_clientMovement.PendingActions == 0) return;
+            await Task.Delay(TimeSpan.FromSeconds(Math.Max(0.001, _clientMovement.NextSendAt - now)));
+            if (!_clientMovement.TryCreateBatch(_movementClock.Elapsed.TotalSeconds, out batch)) return;
+        }
+        await SendAsync(GamePacketOpcode.MovementActions, MovementActionProtocol.CreateBatch(batch));
     }
 
     internal async Task ChangeAsync(uint mapId, ChangeMapResult result = ChangeMapResult.Success)
@@ -319,6 +346,28 @@ internal sealed class PlatformPeer : IDisposable
                 PlatformProtocol.Complete(_pending, packet.Payload);
                 Geometry = _pending;
                 _pending = null;
+                _clientMovement.Configure(Geometry);
+                _lastAdvance = _movementClock.Elapsed.TotalSeconds;
+                _lastJump = false;
+                break;
+            case GamePacketOpcode.MovementActionsBroadcast:
+                var batch = MovementActionProtocol.ReadBroadcast(packet.Payload);
+                if (Geometry == null || batch.MapId != Geometry.MapId || batch.Generation != Geometry.Generation)
+                    break;
+                ++MovementPackets;
+                foreach (var relay in batch.Actions)
+                {
+                    Actions.Add(relay);
+                    var action = relay.Action;
+                    States[relay.CharacterId] = new MovementSnapshot
+                    {
+                        MapId = batch.MapId, Generation = batch.Generation, CharacterId = relay.CharacterId,
+                        ServerTick = batch.ServerTick, Sequence = action.Sequence,
+                        X = action.State.X, Y = action.State.Y, VelocityX = action.State.VelocityX, VelocityY = action.State.VelocityY,
+                        Grounded = action.State.Grounded, FootholdId = action.State.FootholdId
+                    };
+                    ActionReceived?.Invoke(relay);
+                }
                 break;
             case GamePacketOpcode.MovementState:
                 MovementSnapshot state = PlatformProtocol.ReadState(packet.Payload);
@@ -355,6 +404,7 @@ internal sealed class PlatformPeer : IDisposable
                     States.Clear();
                     LastMove = null;
                     Chat.Clear();
+                    Actions.Clear(); _clientMovement.Reset();
                 }
                 break;
             case GamePacketOpcode.MoveResponse:
