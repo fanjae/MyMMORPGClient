@@ -74,9 +74,31 @@ internal static class NetworkReliability
             Program.Check(large.Opcode == 42 && large.Payload.Length == 4092 && small.Opcode == 43 && small.Payload[0] == 7, "Fragmented frame changed");
             Console.WriteLine("[PASS] Fragmented and coalesced TCP frames preserve packet boundaries");
 
+            var receivedTraffic = session.GetTraffic();
+            Program.Check(receivedTraffic.ReceivedPackets == 2 && receivedTraffic.ReceivedBytes == 4101 &&
+                session.GetTraffic(42).ReceivedBytes == 4096 && session.GetTraffic(43).ReceivedBytes == 5,
+                "Fragmented reads were counted as messages or opcode byte counts changed");
+            await session.SendAsync(23, new byte[] { 1, 2, 3 });
+            await session.SendAsync(9, Array.Empty<byte>());
+            byte[] sentFrames = new byte[11];
+            await first.GetStream().ReadExactlyAsync(sentFrames).AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+            Program.Check(sentFrames.SequenceEqual(Frame(23, new byte[] { 1, 2, 3 }).Concat(Frame(9, Array.Empty<byte>()))),
+                "Traffic metrics changed sent frames");
+            bool oversizedRejected = false;
+            try { await session.SendAsync(23, new byte[TcpSession.MaxPacketSize]); }
+            catch (InvalidOperationException) { oversizedRejected = true; }
+            var sentTraffic = session.GetTraffic();
+            Program.Check(oversizedRejected && sentTraffic.SentPackets == 2 && sentTraffic.SentBytes == 11 &&
+                session.GetTraffic(23).SentPackets == 1 && session.GetTraffic(23).SentBytes == 7 &&
+                sentTraffic.QueuedSendBytes == 0 && sentTraffic.PeakQueuedSendBytes == 7,
+                "Failed send was counted, movement was mixed with chat or queue bytes leaked");
+            Console.WriteLine("[PASS] Traffic counts complete frames, separates opcodes and excludes rejected sends");
+
             session.Dispose();
             await session.ConnectAsync("127.0.0.1", port);
             using TcpClient second = await listener.AcceptTcpClientAsync().WaitAsync(TimeSpan.FromSeconds(2));
+            Program.Check(session.GetTraffic().ReceivedPackets == 0 && session.GetTraffic().SentPackets == 0 &&
+                session.GetTraffic().PeakQueuedSendBytes == 0, "Reconnect retained the previous connection's traffic");
             first.Dispose();
             await second.GetStream().WriteAsync(Frame(44, new byte[] { 8 }));
             var reconnected = await packets.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
@@ -96,6 +118,11 @@ internal static class NetworkReliability
             byte[] marker = new byte[5];
             await third.GetStream().ReadExactlyAsync(marker).AsTask().WaitAsync(TimeSpan.FromSeconds(2));
             Program.Check(marker.SequenceEqual(Frame(51, new byte[] { 9 })), "Old packet leaked to new connection");
+            var freshTraffic = session.GetTraffic();
+            Program.Check(freshTraffic.SentPackets == 1 && freshTraffic.SentBytes == 5 && freshTraffic.QueuedSendBytes == 0 &&
+                freshTraffic.PeakQueuedSendBytes == 5 && session.GetTraffic(50).SentPackets == 0,
+                "Old pending sends changed new connection traffic or queue peak");
+            Console.WriteLine("[PASS] Reconnection isolates traffic totals and queue peaks from old pending sends");
             Console.WriteLine("[PASS] Pending sends are bounded and never migrate to new connection");
             third.Dispose();
             Stopwatch closing = Stopwatch.StartNew();

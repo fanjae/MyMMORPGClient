@@ -1,5 +1,7 @@
 # Unity 2D 테스트 클라이언트
 
+2026-10-09 게임 패널에 protocol version, 실제 이동 TX/RX 횟수·바이트와 연결별 송신 대기량·최대값을 추가했습니다. 집계 기준과 로컬 검증은 [MOVEMENT_METRICS.md](../MyMMORPGServer/docs/MOVEMENT_METRICS.md), 금일 결과는 [WORK_REPORT_2026-10-09.md](../MyMMORPGServer/docs/WORK_REPORT_2026-10-09.md)에 있습니다. 이번 작업은 C# 자동 검사와 Unity 참조 어셈블리로 전체 스크립트 컴파일까지 확인하며, 계측 UI를 사용하려면 Unity Editor에서 실행하거나 Windows Player를 다시 빌드해야 합니다.
+
 다른 장소 PC의 연결 거부(10061), 서버 수신 주소와 외부 접속 설정은 [REMOTE_ACCESS.md](../MyMMORPGServer/docs/REMOTE_ACCESS.md)를 참고합니다. SERVER_BIND_IP는 서버용이며 클라이언트 Host에는 서버의 실제 IP를 입력합니다.
 
 2026-10-08 Game version **6**으로 갱신했습니다. 발판 이동·점프·착지를 클라이언트가 계산하고 서버는 행동과 보고 상태를 중계합니다. 이동 관련 송신은 최대 초당 5회이며 변경이 없으면 약 1초마다 상태 확인을 보냅니다. 새 Windows 실행 파일은 `Builds/MovementRelay/MyMMORPGClient.exe`입니다. 서버와 클라이언트를 함께 갱신해야 합니다. 설계·자동 검증·LAN 확인은 [CLIENT_MOVEMENT_RELAY.md](../MyMMORPGServer/docs/CLIENT_MOVEMENT_RELAY.md)를 참고합니다. Login version 2·UTF-8 이름 65바이트 형식은 유지합니다. 기존 [MOVEMENT_RECONCILIATION.md](../MyMMORPGServer/docs/MOVEMENT_RECONCILIATION.md)는 version 5 재실행 방식의 기록입니다.
@@ -101,11 +103,11 @@
 
 ## 2. 클라이언트 두 개 실행
 
-1. Unity Hub에서 이 프로젝트를 Unity `6000.3.7f1`로 열고, 필요한 경우 `File > Build Profiles`에서 `SampleScene`을 포함해 Windows 빌드를 만듭니다. 이 저장소에서 만든 최신 빌드는 `Builds/Movement/MyMMORPGClient.exe`에 있습니다. 빌드 폴더의 실행 파일, `MyMMORPGClient_Data`, `UnityPlayer.dll` 등을 함께 둡니다.
+1. Unity Hub에서 이 프로젝트를 Unity `6000.3.7f1`로 열고, 필요한 경우 `File > Build Profiles`에서 `SampleScene`을 포함해 Windows 빌드를 만듭니다. 2026-10-08의 version 6 빌드는 `Builds/MovementRelay/MyMMORPGClient.exe`에 있습니다. 오늘 추가한 계측 화면은 해당 실행 파일을 현재 코드로 다시 빌드한 뒤 확인합니다. 빌드 폴더의 실행 파일, `MyMMORPGClient_Data`, `UnityPlayer.dll` 등을 함께 둡니다.
 2. 클라이언트 저장소 루트에서 Windows 빌드를 두 번 실행합니다.
 
    ```powershell
-   $clientExe = (Resolve-Path .\Builds\Movement\MyMMORPGClient.exe).Path
+   $clientExe = (Resolve-Path .\Builds\MovementRelay\MyMMORPGClient.exe).Path
    Start-Process -FilePath $clientExe -WorkingDirectory (Split-Path $clientExe)
    Start-Process -FilePath $clientExe -WorkingDirectory (Split-Path $clientExe)
    ```

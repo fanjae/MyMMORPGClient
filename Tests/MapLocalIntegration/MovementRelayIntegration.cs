@@ -70,7 +70,15 @@ internal static class MovementRelayIntegration
             await a.SendManualAsync(jump, 1004); await Pump(settle);
             Program.Check(b.States[1001].Sequence == 1004 && !b.States[1001].Grounded, "Fresh post-landing jump rejected");
             Console.WriteLine("[PASS] TCP matching landing unlocks a new jump and never resurrects the previous jump");
-            Console.WriteLine($"PASS 3 movement relay TCP tests ({delay}±{jitter}ms per proxy direction)");
+            var sentTraffic = a.SendTraffic;
+            var receivedTraffic = b.ReceiveTraffic;
+            Program.Check(sentTraffic.SentPackets == a.SentPackets && sentTraffic.SentBytes == a.SentBytes && sentTraffic.QueuedSendBytes == 0 &&
+                receivedTraffic.ReceivedPackets == b.MovementPackets && receivedTraffic.ReceivedBytes == b.MovementBytes,
+                "TCP movement traffic differs from complete sent/parsed frames");
+            Console.WriteLine("[PASS] TCP movement byte and packet metrics match actual sent and parsed frames");
+            Console.WriteLine($"[METRICS] delayMs={delay} jitterMs={jitter} txPackets={sentTraffic.SentPackets} txBytes={sentTraffic.SentBytes} " +
+                $"rxPackets={receivedTraffic.ReceivedPackets} rxBytes={receivedTraffic.ReceivedBytes} queuedBytes={sentTraffic.QueuedSendBytes} peakQueuedBytes={sentTraffic.PeakQueuedSendBytes}");
+            Console.WriteLine($"PASS 4 movement relay TCP tests ({delay}±{jitter}ms per proxy direction)");
             return 0;
 
             async Task Pump(int milliseconds)
@@ -94,6 +102,9 @@ internal static class MovementRelayIntegration
         internal uint CharacterId;
         internal MapGeometryData Geometry;
         internal int MovementPackets;
+        internal long MovementBytes, SentPackets, SentBytes;
+        internal TcpSession.TrafficSnapshot SendTraffic => _session.GetTraffic((ushort)GamePacketOpcode.MovementActions);
+        internal TcpSession.TrafficSnapshot ReceiveTraffic => _session.GetTraffic((ushort)GamePacketOpcode.MovementActionsBroadcast);
         internal readonly Dictionary<uint, MovementSnapshot> States = new();
         internal readonly List<RelayedMovementAction> Events = new();
         internal event Action<RelayedMovementAction> ActionReceived;
@@ -118,7 +129,10 @@ internal static class MovementRelayIntegration
             double delay = _nextSendAt - _clock.Elapsed.TotalSeconds;
             if (delay > 0) await Task.Delay(TimeSpan.FromSeconds(delay));
             _nextSendAt = _clock.Elapsed.TotalSeconds + 0.2;
-            await _session.SendAsync((ushort)GamePacketOpcode.MovementActions, MovementActionProtocol.CreateBatch(batch));
+            byte[] payload = MovementActionProtocol.CreateBatch(batch);
+            await _session.SendAsync((ushort)GamePacketOpcode.MovementActions, payload);
+            ++SentPackets;
+            SentBytes += TcpSession.HeaderSize + payload.Length;
         }
 
         internal Task SendManualAsync(MovementActionData action, ulong batchSequence)
@@ -147,6 +161,7 @@ internal static class MovementRelayIntegration
                     var batch = MovementActionProtocol.ReadBroadcast(packet.Payload);
                     Program.Check(batch.MapId == Geometry.MapId && batch.Generation == Geometry.Generation, "Wrong broadcast map generation");
                     ++MovementPackets;
+                    MovementBytes += TcpSession.HeaderSize + packet.Payload.Length;
                     foreach (var relay in batch.Actions)
                     {
                         Events.Add(relay);

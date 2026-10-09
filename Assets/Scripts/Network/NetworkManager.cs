@@ -14,6 +14,10 @@ public sealed class NetworkManager : MonoBehaviour
     private MapGeometryData _pendingGeometry;
     private MapInfoData _mapBounds;
 
+    public TcpSession.TrafficSnapshot GameTraffic => _gameSession?.GetTraffic() ?? default;
+    public TcpSession.TrafficSnapshot MovementSendTraffic => _gameSession?.GetTraffic((ushort)GamePacketOpcode.MovementActions) ?? default;
+    public TcpSession.TrafficSnapshot MovementReceiveTraffic => _gameSession?.GetTraffic((ushort)GamePacketOpcode.MovementActionsBroadcast) ?? default;
+
     public event Action<LoginResult> LoginCompleted;
     public event Action<CharacterListData> CharacterListReceived;
     public event Action<CharacterSelectData> CharacterSelected;

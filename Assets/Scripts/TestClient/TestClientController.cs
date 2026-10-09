@@ -22,6 +22,7 @@ public sealed class TestClientController : MonoBehaviour
     private ulong _chatSubmission;
     private readonly Dictionary<uint, string> _playerNames = new();
     private Vector2 _chatScroll;
+    private Vector2 _statusScroll;
     private readonly LocalMovementState _movementState = new();
     private MapInfoData _mapInfo;
     private float _moveResponseDeadline;
@@ -177,7 +178,9 @@ public sealed class TestClientController : MonoBehaviour
             GUI.FocusControl(null);
 
         GUILayout.BeginArea(panel, GUI.skin.box);
+        _statusScroll = GUILayout.BeginScrollView(_statusScroll);
         GUILayout.Label("MyMMORPG Test Client");
+        GUILayout.Label($"Game protocol: {GameProtocol.ProtocolVersion}");
         GUILayout.Label(_status);
         GUILayout.Label($"Map: {_currentMapId}  Local: {_worldManager.LocalCharacterId}");
         GUILayout.Label($"Remote players: {_worldManager.RemotePlayerCount}  Monsters: {_worldManager.MonsterCount}");
@@ -193,7 +196,16 @@ public sealed class TestClientController : MonoBehaviour
         GUILayout.Label(_lastPlayerMove);
         GUILayout.Label(_platformMovement.IsPlatformer ? "Left/Right + Space: client jump / landing relay" : "Arrow keys: move (click game view)");
         if (_platformMovement.IsPlatformer)
-            GUILayout.Label($"Actions pending: {_platformMovement.PendingActions}  Sent: {_platformMovement.PacketsSent}  Jump ready: {_platformMovement.CanJump}");
+        {
+            GUILayout.Label($"Actions pending: {_platformMovement.PendingActions}  Jump ready: {_platformMovement.CanJump}");
+            var sent = _networkManager.MovementSendTraffic;
+            var received = _networkManager.MovementReceiveTraffic;
+            GUILayout.Label($"Movement TX: {sent.SentPackets} packets / {sent.SentBytes} B");
+            GUILayout.Label($"Movement RX: {received.ReceivedPackets} packets / {received.ReceivedBytes} B");
+        }
+        var traffic = _networkManager.GameTraffic;
+        GUILayout.Label($"Game TX/RX: {traffic.SentBytes}/{traffic.ReceivedBytes} B");
+        GUILayout.Label($"TCP pending: {traffic.QueuedSendBytes} B  Peak: {traffic.PeakQueuedSendBytes} B");
 
         GUI.enabled = !_changingMap;
 
@@ -207,6 +219,7 @@ public sealed class TestClientController : MonoBehaviour
         }
         GUILayout.EndHorizontal();
         GUI.enabled = true;
+        GUILayout.EndScrollView();
         GUILayout.EndArea();
 
         DrawChatPanel(chatPanel);

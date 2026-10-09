@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net.Sockets;
 using System.Threading;
@@ -12,6 +13,23 @@ public sealed class TcpSession : IDisposable
     private readonly object _lifecycleLock = new();
     private Connection _connection;
 
+    public readonly struct TrafficSnapshot
+    {
+        public readonly long SentPackets, SentBytes, ReceivedPackets, ReceivedBytes;
+        public readonly int QueuedSendBytes, PeakQueuedSendBytes;
+        internal TrafficSnapshot(long sentPackets, long sentBytes, long receivedPackets, long receivedBytes, int queuedBytes, int peakBytes)
+        {
+            SentPackets = sentPackets; SentBytes = sentBytes;
+            ReceivedPackets = receivedPackets; ReceivedBytes = receivedBytes;
+            QueuedSendBytes = queuedBytes; PeakQueuedSendBytes = peakBytes;
+        }
+    }
+
+    private struct TrafficCounter
+    {
+        public long SentPackets, SentBytes, ReceivedPackets, ReceivedBytes;
+    }
+
     private sealed class Connection
     {
         public readonly TcpClient Client = new();
@@ -20,6 +38,9 @@ public sealed class TcpSession : IDisposable
         public readonly CancellationToken Token;
         public NetworkStream Stream;
         public int QueuedBytes;
+        public int PeakQueuedBytes;
+        public readonly object TrafficLock = new();
+        public readonly Dictionary<ushort, TrafficCounter> Traffic = new();
 
         public Connection() { Token = Cancellation.Token; }
         public void Close()
@@ -33,6 +54,41 @@ public sealed class TcpSession : IDisposable
     public event Action<ushort, byte[]> PacketReceived;
     public event Action Disconnected;
     public bool IsConnected => Volatile.Read(ref _connection)?.Client.Connected == true;
+
+    public TrafficSnapshot GetTraffic(ushort? opcode = null)
+    {
+        Connection connection = Volatile.Read(ref _connection);
+        if (connection == null)
+            return default;
+        lock (connection.TrafficLock)
+        {
+            TrafficCounter counter = default;
+            if (opcode.HasValue)
+                connection.Traffic.TryGetValue(opcode.Value, out counter);
+            else
+            {
+                foreach (TrafficCounter value in connection.Traffic.Values)
+                {
+                    counter.SentPackets += value.SentPackets; counter.SentBytes += value.SentBytes;
+                    counter.ReceivedPackets += value.ReceivedPackets; counter.ReceivedBytes += value.ReceivedBytes;
+                }
+            }
+            // 바이트 수는 게임 헤더를 포함하며 대기량은 opcode와 관계없이 연결 전체 기준이다.
+            return new TrafficSnapshot(counter.SentPackets, counter.SentBytes, counter.ReceivedPackets, counter.ReceivedBytes,
+                connection.QueuedBytes, connection.PeakQueuedBytes);
+        }
+    }
+
+    private static void RecordTraffic(Connection connection, ushort opcode, int size, bool sent)
+    {
+        lock (connection.TrafficLock)
+        {
+            connection.Traffic.TryGetValue(opcode, out TrafficCounter counter);
+            if (sent) { ++counter.SentPackets; counter.SentBytes += size; }
+            else { ++counter.ReceivedPackets; counter.ReceivedBytes += size; }
+            connection.Traffic[opcode] = counter;
+        }
+    }
 
     public async Task ConnectAsync(string host, int port, int timeoutMs = 5000)
     {
@@ -71,9 +127,18 @@ public sealed class TcpSession : IDisposable
         if (packetSize > MaxPacketSize)
             throw new InvalidOperationException("Packet exceeds maximum size.");
 
-        if (Interlocked.Add(ref connection.QueuedBytes, packetSize) > MaxQueuedSendBytes)
+        bool queueFull;
+        lock (connection.TrafficLock)
         {
-            Interlocked.Add(ref connection.QueuedBytes, -packetSize);
+            queueFull = packetSize > MaxQueuedSendBytes - connection.QueuedBytes;
+            if (!queueFull)
+            {
+                connection.QueuedBytes += packetSize;
+                connection.PeakQueuedBytes = Math.Max(connection.PeakQueuedBytes, connection.QueuedBytes);
+            }
+        }
+        if (queueFull)
+        {
             Disconnect(connection, true);
             throw new IOException("Session send queue limit reached.");
         }
@@ -96,6 +161,8 @@ public sealed class TcpSession : IDisposable
             if (!ReferenceEquals(Volatile.Read(ref _connection), connection))
                 throw new OperationCanceledException();
             await connection.Stream.WriteAsync(packet, 0, packet.Length, timeout.Token);
+            // 전송 실패와 묶음 생성만 한 요청은 제외하고 실제 쓰기 완료 뒤에 집계한다.
+            RecordTraffic(connection, opcode, packetSize, true);
         }
         catch
         {
@@ -106,7 +173,8 @@ public sealed class TcpSession : IDisposable
         {
             if (acquired)
                 connection.SendLock.Release();
-            Interlocked.Add(ref connection.QueuedBytes, -packetSize);
+            lock (connection.TrafficLock)
+                connection.QueuedBytes -= packetSize;
         }
     }
 
@@ -127,6 +195,7 @@ public sealed class TcpSession : IDisposable
                 byte[] payload = new byte[size - HeaderSize];
                 if (payload.Length > 0)
                     await ReadExactAsync(connection.Stream, payload, payload.Length, connection.Token);
+                RecordTraffic(connection, opcode, size, false);
                 lock (_lifecycleLock)
                 {
                     if (ReferenceEquals(Volatile.Read(ref _connection), connection))
